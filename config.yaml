@@ -1,0 +1,151 @@
+{
+  "data_source": "real",
+  "strategy_activation_date": "2026-06-09",
+  "peak_window_trading_days": 250,
+  "round_amount_to": 10,
+  "bullet_account": {
+    "name": "余额宝",
+    "balance": 2000
+  },
+  "life_account": {
+    "name": "银行卡余额",
+    "participates_in_replenishment": false
+  },
+  "email": {
+    "enabled": false,
+    "smtp_host": "smtp.example.com",
+    "smtp_port": 587,
+    "use_tls": true,
+    "username": "sender@example.com",
+    "password": "your_app_password",
+    "sender": "sender@example.com",
+    "receivers": [
+      "receiver@example.com"
+    ],
+    "send_only_when_action_required": true
+  },
+  "backtest": {
+    "enabled": true,
+    "start_date": "2023-01-01",
+    "initial_cash": 2000,
+    "monthly_cash_addition": 0,
+    "include_regular_dca": false,
+    "funds": [
+      "270042",
+      "539001",
+      "012349"
+    ]
+  },
+  "replenishment_levels": [
+    {
+      "drawdown_percent": 10,
+      "cash_ratio": 0.15
+    },
+    {
+      "drawdown_percent": 15,
+      "cash_ratio": 0.25
+    },
+    {
+      "drawdown_percent": 20,
+      "cash_ratio": 0.35
+    }
+  ],
+  "funds": [
+    {
+      "code": "270042",
+      "name": "广发纳斯达克100ETF联接A"
+    },
+    {
+      "code": "539001",
+      "name": "建信纳斯达克100指数(QDII)"
+    },
+    {
+      "code": "012349",
+      "name": "天弘恒生科技ETF联接C"
+    }
+  ],
+  "asset_config": {
+    "assets": [
+      {
+        "code": "NASDAQ100",
+        "name": "NASDAQ100",
+        "fund_codes": [
+          "270042",
+          "539001"
+        ]
+      },
+      {
+        "code": "HSTECH",
+        "name": "HSTECH",
+        "fund_codes": [
+          "012349"
+        ]
+      }
+    ]
+  },
+  "portfolio_backtest": {
+    "enabled": true,
+    "start_date": "2023-01-01",
+    "bullet_cash_initial": 2000,
+    "bullet_cash_monthly_addition": 0,
+    "dca_frequency": "weekly",
+    "assets": [
+      {
+        "asset_id": "NASDAQ100",
+        "asset_name": "纳斯达克100",
+        "representative_fund": "270042",
+        "strategy": "drawdown_plus_dca",
+        "weekly_dca_amount": 50,
+        "drawdown_levels": [
+          {
+            "level": 10,
+            "cash_ratio": 0.15
+          },
+          {
+            "level": 15,
+            "cash_ratio": 0.25
+          },
+          {
+            "level": 20,
+            "cash_ratio": 0.35
+          }
+        ]
+      },
+      {
+        "asset_id": "HSTECH",
+        "asset_name": "恒生科技",
+        "representative_fund": "012349",
+        "strategy": "dca_only",
+        "weekly_dca_amount": 20
+      },
+      {
+        "asset_id": "CASHFLOW",
+        "asset_name": "自由现金流",
+        "representative_fund": "023918",
+        "strategy": "dca_only",
+        "weekly_dca_amount": 30
+      },
+      {
+        "asset_id": "DIVIDEND_LOW_VOL",
+        "asset_name": "红利低波",
+        "representative_fund": "008163",
+        "strategy": "dca_only",
+        "weekly_dca_amount": 20
+      },
+      {
+        "asset_id": "GOLD",
+        "asset_name": "黄金",
+        "representative_fund": "000216",
+        "strategy": "dca_only",
+        "weekly_dca_amount": 10
+      }
+    ]
+  },
+  "excluded_assets": [
+    "黄金ETF",
+    "自由现金流ETF",
+    "红利低波ETF",
+    "债券基金",
+    "货币基金"
+  ]
+}

@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+logs/*.txt
+backtest_plots/
+config.local.yaml
+*.backup.json
+backtest_report.json
+scenarios_report.json
+asset_backtest_report.json
+portfolio_backtest_report.json
+weekly_dca_analysis.json
+strategy_lab_report.json
+daily_log.json
+records.json
+transactions.json
