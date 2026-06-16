@@ -98,6 +98,18 @@ class Storage:
     def load_rebalance_advice(self):
         return self._load_json("rebalance_advice.json", {})
 
+    def save_committee_report(self, report):
+        markdown = report.get("markdown", "")
+        json_report = {key: value for key, value in report.items() if key != "markdown"}
+        self._save_json("committee_report.json", json_report)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        path = self.data_dir / "committee_report.md"
+        with path.open("w", encoding="utf-8") as file:
+            file.write(markdown)
+
+    def load_committee_report(self):
+        return self._load_json("committee_report.json", {})
+
     def save_fund_check_report(self, report):
         self._save_json("fund_check_report.json", report)
 

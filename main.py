@@ -15,6 +15,7 @@ from drawdownguard.backtest import (
     summarize_scenarios_returns,
 )
 from drawdownguard.asset_dca_audit import run_asset_dca_audit, summarize_asset_dca_audit
+from drawdownguard.committee_report import build_committee_report
 from drawdownguard.data_provider import NavDataProvider
 from drawdownguard.contribution import run_contribution_analysis, summarize_contribution_report
 from drawdownguard.dca_strategy_lab import (
@@ -267,6 +268,24 @@ def _build_and_save_rebalance_advice(config_file):
     )
     storage.save_rebalance_advice(report)
     return report
+
+
+def run_committee_report_command(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    policy_report = run_policy_checks(config)
+    report = build_committee_report(
+        config,
+        policy_check_report=policy_report,
+        daily_logs=storage.load_daily_logs(),
+        portfolio_backtest_report=storage.load_portfolio_backtest_report(),
+        contribution_report=storage.load_contribution_report(),
+        rebalance_advice=storage.load_rebalance_advice(),
+    )
+    storage.save_committee_report(report)
+    print("投委会报告已写入 data/committee_report.md 和 data/committee_report.json")
+    print(report["markdown"])
+    return 0
 
 
 def run_backtest(args):
@@ -1001,6 +1020,9 @@ def parse_args():
 
     rebalance_detail_parser = subparsers.add_parser("rebalance-detail", help="查看详细再平衡建议")
     rebalance_detail_parser.set_defaults(func=show_rebalance_detail)
+
+    committee_report_parser = subparsers.add_parser("committee-report", help="生成个人投委会报告")
+    committee_report_parser.set_defaults(func=run_committee_report_command)
 
     backtest_parser = subparsers.add_parser("backtest", help="运行历史回测")
     backtest_parser.set_defaults(func=run_backtest)

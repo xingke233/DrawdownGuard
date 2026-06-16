@@ -1062,3 +1062,33 @@ data/rebalance_advice.json
 - 债券偏高但未超上限时，不建议立即卖出。
 - HSTECH 作为小仓位卫星资产观察，不使用子弹仓主动追补。
 - 主动基金和有色金属保持观察，不新增定投。
+
+## V3.9 投委会报告
+
+Investment Committee Report Generator 会把真实画像、持仓、策略检查、每日补仓检查、组合回测、资产贡献和再平衡建议整合为一份 Markdown 报告，同时输出 JSON，便于后续生成 PDF 或网页。
+
+运行：
+
+```bash
+python3 main.py committee-report
+```
+
+输出文件：
+
+```text
+data/committee_report.md
+data/committee_report.json
+```
+
+报告包含：
+
+- 账户总览
+- 当前持仓结构
+- 今日补仓检查
+- 组合回测摘要
+- 资产贡献分析
+- 再平衡建议
+- 投委会结论
+- 风险提示
+
+如果某个上游报告不存在，投委会报告会显示“暂无数据，请先运行对应命令”，不会中断生成。

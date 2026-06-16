@@ -357,3 +357,31 @@ python3 main.py rebalance-detail
 - HSTECH 维持小仓位观察，不使用子弹仓主动追补。
 - 红利低波继续按 `accumulated_nav` 观察。
 - 主动基金和有色金属不新增定投，仅观察。
+
+## V3.9 Investment Committee Report Generator
+
+本次新增投委会报告生成器，只聚合已有配置和报告，不自动交易，不修改补仓策略逻辑，不修改 `portfolio-backtest`。
+
+新增命令：
+
+```bash
+python3 main.py committee-report
+```
+
+输出文件：
+
+- `data/committee_report.md`
+- `data/committee_report.json`
+
+报告模块：
+
+- 账户总览
+- 当前持仓结构
+- 今日补仓检查
+- 组合回测摘要
+- 资产贡献分析
+- 再平衡建议
+- 投委会结论
+- 风险提示
+
+缺失的上游报告会显示“暂无数据，请先运行对应命令”，不会导致命令失败。
