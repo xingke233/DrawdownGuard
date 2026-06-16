@@ -327,3 +327,33 @@ python3 main.py policy-check
 允许补仓基金：`270042`、`012752`、`012349`。
 
 禁止补仓基金：`023918`、`008163`、`000216`、`110017`、`420102`、`000546`、`018125`、`016708`。
+
+## V3.8 Rebalancing Advisor
+
+本次新增再平衡建议模块，只生成建议，不自动交易，不修改补仓策略逻辑，不修改 `portfolio-backtest` 逻辑。
+
+新增命令：
+
+```bash
+python3 main.py rebalance-advice
+python3 main.py rebalance-detail
+```
+
+输出文件：
+
+- `data/rebalance_advice.json`
+
+目标权重配置已加入 `data/user_profile.json`：
+
+- `CASH`：15%，区间 10% 到 25%。
+- `CORE`：35%，区间 25% 到 50%。
+- `SATELLITE`：20%，区间 10% 到 30%。
+- `DEFENSIVE`：30%，区间 20% 到 45%。
+
+当前建议规则：
+
+- 当前核心资产低配时，建议未来定投优先流向 NASDAQ100。
+- 防守资产高于目标但未超上限时，建议维持，不立即卖债券。
+- HSTECH 维持小仓位观察，不使用子弹仓主动追补。
+- 红利低波继续按 `accumulated_nav` 观察。
+- 主动基金和有色金属不新增定投，仅观察。

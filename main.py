@@ -45,6 +45,7 @@ from drawdownguard.real_config import (
     summarize_policy_check,
     summarize_profile,
 )
+from drawdownguard.rebalance_advisor import build_rebalance_advice, summarize_rebalance_advice
 from drawdownguard.risk_compare import run_risk_compare, summarize_risk_compare_report
 from drawdownguard.storage import Storage
 from drawdownguard.strategy import DrawdownStrategy
@@ -239,6 +240,33 @@ def run_policy_check_command(args):
     report = run_policy_checks(config)
     print(summarize_policy_check(report))
     return 0 if report.get("passed") else 1
+
+
+def run_rebalance_advice_command(args):
+    report = _build_and_save_rebalance_advice(args.config)
+    print("再平衡建议已写入 data/rebalance_advice.json")
+    print(summarize_rebalance_advice(report, detail=False))
+    return 0
+
+
+def show_rebalance_detail(args):
+    report = _build_and_save_rebalance_advice(args.config)
+    print("再平衡建议已写入 data/rebalance_advice.json")
+    print(summarize_rebalance_advice(report, detail=True))
+    return 0
+
+
+def _build_and_save_rebalance_advice(config_file):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(config_file)
+    report = build_rebalance_advice(
+        config,
+        portfolio_strategy_report=storage.load_portfolio_strategy_report(),
+        portfolio_optimize_report=storage.load_portfolio_optimize_report(),
+        contribution_report=storage.load_contribution_report(),
+    )
+    storage.save_rebalance_advice(report)
+    return report
 
 
 def run_backtest(args):
@@ -967,6 +995,12 @@ def parse_args():
 
     policy_check_parser = subparsers.add_parser("policy-check", help="检查真实配置是否符合补仓和账户隔离规则")
     policy_check_parser.set_defaults(func=run_policy_check_command)
+
+    rebalance_advice_parser = subparsers.add_parser("rebalance-advice", help="生成真实持仓再平衡建议")
+    rebalance_advice_parser.set_defaults(func=run_rebalance_advice_command)
+
+    rebalance_detail_parser = subparsers.add_parser("rebalance-detail", help="查看详细再平衡建议")
+    rebalance_detail_parser.set_defaults(func=show_rebalance_detail)
 
     backtest_parser = subparsers.add_parser("backtest", help="运行历史回测")
     backtest_parser.set_defaults(func=run_backtest)

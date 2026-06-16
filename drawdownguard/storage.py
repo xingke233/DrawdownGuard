@@ -92,6 +92,12 @@ class Storage:
     def load_contribution_report(self):
         return self._load_json("contribution_report.json", {})
 
+    def save_rebalance_advice(self, report):
+        self._save_json("rebalance_advice.json", report)
+
+    def load_rebalance_advice(self):
+        return self._load_json("rebalance_advice.json", {})
+
     def save_fund_check_report(self, report):
         self._save_json("fund_check_report.json", report)
 

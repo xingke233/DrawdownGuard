@@ -1030,3 +1030,35 @@ python3 main.py portfolio-report
 - 禁止补仓基金：`023918`、`008163`、`000216`、`110017`、`420102`、`000546`、`018125`、`016708`。
 
 更新真实持仓时，只修改 `data/current_holdings.json`、`data/dca_plan.json` 和 `data/policy_config.json`，不要把真实配置写进 Python 代码。
+
+## V3.8 再平衡建议
+
+Rebalancing Advisor 基于真实持仓、四大类资产分类、当前权重和目标权重生成建议，只输出辅助决策，不自动交易，也不改变补仓策略或组合回测逻辑。
+
+运行：
+
+```bash
+python3 main.py rebalance-advice
+python3 main.py rebalance-detail
+```
+
+输出文件：
+
+```text
+data/rebalance_advice.json
+```
+
+默认目标权重位于 `data/user_profile.json` 的 `target_allocation`：
+
+- `CASH`：目标 15%，区间 10% 到 25%。
+- `CORE`：目标 35%，区间 25% 到 50%。
+- `SATELLITE`：目标 20%，区间 10% 到 30%。
+- `DEFENSIVE`：目标 30%，区间 20% 到 45%。
+
+建议原则：
+
+- 优先通过未来定投流向调整完成再平衡。
+- NASDAQ100 是核心资产，低配时提高未来定投优先级。
+- 债券偏高但未超上限时，不建议立即卖出。
+- HSTECH 作为小仓位卫星资产观察，不使用子弹仓主动追补。
+- 主动基金和有色金属保持观察，不新增定投。

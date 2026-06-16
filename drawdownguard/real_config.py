@@ -57,6 +57,7 @@ def apply_real_profile(config, real_data):
         or policy_data.get("version")
     )
     config["investor_profile"] = profile_data.get("investor_profile", {})
+    config["target_allocation"] = profile_data.get("target_allocation", {})
     config["bullet_cash"] = bullet_cash
     config["life_account"] = {
         **config.get("life_account", {}),

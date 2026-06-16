@@ -27,5 +27,27 @@
   },
   "life_account": {
     "investable": false
+  },
+  "target_allocation": {
+    "CASH": {
+      "target": 0.15,
+      "min": 0.10,
+      "max": 0.25
+    },
+    "CORE": {
+      "target": 0.35,
+      "min": 0.25,
+      "max": 0.50
+    },
+    "SATELLITE": {
+      "target": 0.20,
+      "min": 0.10,
+      "max": 0.30
+    },
+    "DEFENSIVE": {
+      "target": 0.30,
+      "min": 0.20,
+      "max": 0.45
+    }
   }
 }
