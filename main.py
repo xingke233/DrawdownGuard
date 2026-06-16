@@ -36,6 +36,7 @@ from drawdownguard.dca_strategy_lab import (
 from drawdownguard.draw_backtest import plot_report_file
 from drawdownguard.email_notifier import send_daily_email
 from drawdownguard.fund_check import run_fund_check, summarize_fund_check_report
+from drawdownguard.nav_cache import NavCache
 from drawdownguard.notifier import format_daily_logs, format_report, format_transactions
 from drawdownguard.portfolio_constraint_optimizer import (
     default_optimizer_workers,
@@ -89,6 +90,10 @@ def create_skipped_result(fund, nav_data):
         "fund_name": fund["name"],
         "data_source": nav_data.get("source", "unknown"),
         "warnings": nav_data.get("warnings", []),
+        "cache_used": nav_data.get("cache_used", False),
+        "cache_stale": nav_data.get("cache_stale", False),
+        "cache_last_updated": nav_data.get("cache_last_updated"),
+        "cache_status": nav_data.get("cache_status"),
         "skipped": True,
         "status": "净值数据缺失，已跳过",
         "suggested_amounts": {},
@@ -110,6 +115,7 @@ def run_monitor_execution(args, emit=True):
             result = strategy.evaluate_fund(fund, nav_data["history"], records)
             result["data_source"] = nav_data["source"]
             result["warnings"] = nav_data["warnings"]
+            _attach_nav_metadata(result, nav_data)
         except Exception as exc:
             result = create_skipped_result(
                 fund,
@@ -156,9 +162,19 @@ def build_daily_log_entries(results):
                 "suggestions": dict(result.get("suggested_amounts", {})),
                 "data_source": result.get("data_source", "unknown"),
                 "warnings": list(result.get("warnings", [])),
+                "cache_used": result.get("cache_used", False),
+                "cache_stale": result.get("cache_stale", False),
+                "cache_last_updated": result.get("cache_last_updated"),
             }
         )
     return entries
+
+
+def _attach_nav_metadata(result, nav_data):
+    result["cache_used"] = nav_data.get("cache_used", False)
+    result["cache_stale"] = nav_data.get("cache_stale", False)
+    result["cache_last_updated"] = nav_data.get("cache_last_updated")
+    result["cache_status"] = nav_data.get("cache_status")
 
 
 def confirm_transaction(args):
@@ -309,6 +325,46 @@ def run_committee_report_command(args):
     return 0
 
 
+def show_cache_status(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    cache = NavCache(BASE_DIR, config)
+    report = cache.status_report()
+    print(_format_cache_status(report))
+    return 0
+
+
+def clear_cache_command(args):
+    if not args.yes:
+        print("这是清空本地净值缓存操作。请追加 --yes 确认执行：python3 main.py cache-clear --yes")
+        return 1
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    cache = NavCache(BASE_DIR, config)
+    cache.clear()
+    print("已清空 data/nav_cache.json")
+    return 0
+
+
+def _format_cache_status(report):
+    lines = ["本地净值缓存状态"]
+    lines.append(f"缓存文件存在：{report.get('exists')}")
+    lines.append(f"缓存路径：{report.get('path')}")
+    lines.append(f"缓存启用：{report.get('enabled')}")
+    lines.append(f"缓存基金数量：{report.get('fund_count', 0)}")
+    for warning in report.get("warnings", []):
+        lines.append(f"提示：{warning}")
+    for item in report.get("items", []):
+        lines.append(
+            f"- {item.get('fund_code')} | {item.get('fund_name')} | {item.get('nav_mode')} | "
+            f"last_updated {item.get('last_updated')} | history {item.get('history_count')} | "
+            f"latest {item.get('latest_nav_date')} | run {item.get('cache_status_for_run')} | "
+            f"backtest {item.get('cache_status_for_backtest')} | "
+            f"满足250条 {item.get('meets_min_history_for_run')}"
+        )
+    return "\n".join(lines)
+
+
 def run_daily_command(args):
     storage = Storage(BASE_DIR)
     steps = _daily_steps(args)
@@ -364,27 +420,35 @@ def _daily_policy_check(args):
 
 def _daily_run(args):
     execution = run_monitor_execution(args, emit=False)
-    warnings = _run_result_warnings(execution.get("results", []))
+    infos, warnings = _run_result_messages(execution.get("results", []))
+    cache_meta = _run_cache_meta(execution.get("results", []))
+    if cache_meta["cache_used"] and not cache_meta["cache_stale"]:
+        infos.append("使用缓存净值")
     if execution.get("code", 1) != 0:
         return {
             "status": "failed",
             "message": "每日补仓检查失败。",
             "warnings": warnings,
             "result_source": "fresh_execution",
+            **cache_meta,
         }
-    if warnings:
+    if warnings or cache_meta["cache_stale"]:
         return {
             "status": "warning",
             "message": "每日补仓检查完成，但存在数据 warning。",
             "warnings": warnings,
+            "infos": infos,
             "result_source": "fresh_execution",
             "provider_class": execution.get("provider_class"),
+            **cache_meta,
         }
     return {
         "status": "success",
         "message": "每日补仓检查完成。",
+        "infos": infos,
         "result_source": "fresh_execution",
         "provider_class": execution.get("provider_class"),
+        **cache_meta,
     }
 
 
@@ -471,6 +535,32 @@ def _run_result_warnings(results):
         for warning in result.get("warnings", []) or []:
             warnings.append(f"{result.get('fund_code')}: {warning}")
     return warnings
+
+
+def _run_result_messages(results):
+    infos = []
+    warnings = []
+    for result in results:
+        fund_code = result.get("fund_code")
+        cache_used = result.get("cache_used")
+        cache_stale = result.get("cache_stale")
+        for warning in result.get("warnings", []) or []:
+            message = f"{fund_code}: {warning}"
+            if cache_used and not cache_stale and ("已切换到缓存数据" in warning or "真实净值获取失败" in warning or "单位净值获取失败" in warning):
+                infos.append(message)
+            else:
+                warnings.append(message)
+    return infos, warnings
+
+
+def _run_cache_meta(results):
+    cache_results = [result for result in results if result.get("cache_used")]
+    last_updated = next((result.get("cache_last_updated") for result in cache_results if result.get("cache_last_updated")), None)
+    return {
+        "cache_used": bool(cache_results),
+        "cache_stale": any(result.get("cache_stale") for result in cache_results),
+        "cache_last_updated": last_updated,
+    }
 
 
 def _flatten_warnings(items):
@@ -1274,6 +1364,13 @@ def parse_args():
 
     committee_report_parser = subparsers.add_parser("committee-report", help="生成个人投委会报告")
     committee_report_parser.set_defaults(func=run_committee_report_command)
+
+    cache_status_parser = subparsers.add_parser("cache-status", help="查看本地净值缓存状态")
+    cache_status_parser.set_defaults(func=show_cache_status)
+
+    cache_clear_parser = subparsers.add_parser("cache-clear", help="清空本地净值缓存")
+    cache_clear_parser.add_argument("--yes", action="store_true", help="确认清空 data/nav_cache.json")
+    cache_clear_parser.set_defaults(func=clear_cache_command)
 
     daily_parser = subparsers.add_parser("daily", help="运行一键每日工作流")
     daily_parser.add_argument("--start-date", default="2018-01-01", help="组合回测开始日期，默认 2018-01-01")

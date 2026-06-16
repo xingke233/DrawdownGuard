@@ -1,5 +1,7 @@
 import json
 
+from .nav_cache import NavCache
+
 
 class NavDataProvider:
     def __init__(self, nav_file, config, akshare_client=None):
@@ -9,6 +11,7 @@ class NavDataProvider:
         self.window = int(config.get("peak_window_trading_days", 250))
         self.local_warnings = []
         self.local_data = self._load_local_data()
+        self.cache = NavCache(nav_file.parent, config)
 
     def get_history(self, fund_code, nav_mode="unit_nav"):
         return self._get_history(fund_code, limit=True, nav_mode=nav_mode)
@@ -23,6 +26,7 @@ class NavDataProvider:
         if data_source == "real":
             try:
                 history = self._get_real_history(fund_code, nav_mode=nav_mode)
+                self._save_cache(fund_code, nav_mode, history)
                 limited = self._limit_history(history) if limit else history
                 return self._result(limited, "real", warnings, nav_mode)
             except Exception as exc:
@@ -30,12 +34,18 @@ class NavDataProvider:
                     warnings.append(f"累计净值获取失败，已回退到单位净值：{exc}")
                     try:
                         history = self._get_real_history(fund_code, nav_mode="unit_nav")
+                        self._save_cache(fund_code, "unit_nav", history)
                         limited = self._limit_history(history) if limit else history
                         return self._result(limited, "real", warnings, "unit_nav")
                     except Exception as unit_exc:
-                        warnings.append(f"单位净值获取失败，已切换到本地数据：{unit_exc}")
+                        warnings.append(f"单位净值获取失败，已切换到缓存数据：{unit_exc}")
                 else:
-                    warnings.append(f"真实净值获取失败，已切换到本地数据：{exc}")
+                    warnings.append(f"真实净值获取失败，已切换到缓存数据：{exc}")
+                cache_result = self._cache_result(fund_code, nav_mode, limit)
+                if cache_result["history"]:
+                    cache_result["warnings"] = [*warnings, *cache_result["warnings"]]
+                    return cache_result
+                warnings.extend(cache_result["warnings"])
                 history, local_warnings = self._get_local_history(fund_code, nav_mode=nav_mode)
                 warnings.extend(local_warnings)
                 limited = self._limit_history(history) if limit else history
@@ -70,6 +80,30 @@ class NavDataProvider:
         if not history:
             warnings.append("本地净值数据缺失。")
         return history, warnings
+
+    def _cache_result(self, fund_code, nav_mode, limit):
+        history, warnings, meta = self.cache.get_history(fund_code, nav_mode, for_backtest=not limit)
+        limited = self._limit_history(history) if limit else history
+        result = self._result(limited, "cache", warnings, nav_mode)
+        result.update(
+            {
+                "cache_used": bool(history),
+                "cache_stale": meta.get("cache_status") == "stale",
+                "cache_last_updated": meta.get("cache_last_updated"),
+                "cache_status": meta.get("cache_status"),
+            }
+        )
+        return result
+
+    def _save_cache(self, fund_code, nav_mode, history):
+        fund_name = self._fund_name(fund_code)
+        self.cache.save_history(fund_code, fund_name, nav_mode, history, source="real", min_keep=None)
+
+    def _fund_name(self, fund_code):
+        for fund in self.config.get("funds", []):
+            if fund.get("code") == fund_code:
+                return fund.get("name", fund_code)
+        return fund_code
 
     def _load_local_data(self):
         if not self.nav_file.exists():
@@ -117,7 +151,16 @@ class NavDataProvider:
                 *warnings,
                 f"净值数据不足{self.window}条，当前仅{len(history)}条，仍按现有数据计算。",
             ]
-        return {"history": history, "source": source, "warnings": warnings, "nav_mode": nav_mode}
+        return {
+            "history": history,
+            "source": source,
+            "warnings": warnings,
+            "nav_mode": nav_mode,
+            "cache_used": source == "cache",
+            "cache_stale": False,
+            "cache_last_updated": None,
+            "cache_status": None,
+        }
 
     @staticmethod
     def _first_present(item, keys):

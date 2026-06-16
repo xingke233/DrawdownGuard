@@ -9,6 +9,9 @@ def format_report(results, config):
         lines.append("━━━━━━━━━━━━━━")
         lines.append(result["fund_name"])
         lines.append(f"数据源：{result.get('data_source', 'unknown')}")
+        if result.get("data_source") == "cache":
+            lines.append(f"缓存更新时间：{_format_cache_time(result.get('cache_last_updated'))}")
+            lines.append(f"缓存状态：{result.get('cache_status') or ('stale' if result.get('cache_stale') else 'fresh')}")
         for warning in result.get("warnings", []):
             lines.append(f"提示：{warning}")
         if result.get("skipped"):
@@ -91,3 +94,9 @@ def _format_optional_percent(value):
     if value is None:
         return "-"
     return f"{value * 100:.2f}%"
+
+
+def _format_cache_time(value):
+    if not value:
+        return "N/A"
+    return str(value).replace("T", " ")[:16]

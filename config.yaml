@@ -1,5 +1,11 @@
 {
   "data_source": "real",
+  "nav_cache": {
+    "enabled": true,
+    "max_age_days_for_run": 7,
+    "max_age_days_for_backtest": 90,
+    "min_history_for_run": 250
+  },
   "strategy_activation_date": "2026-06-09",
   "peak_window_trading_days": 250,
   "round_amount_to": 10,

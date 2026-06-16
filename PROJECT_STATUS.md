@@ -425,3 +425,34 @@ python3 main.py daily --quick --clean-proxy
 - 如果 `committee-report` 无法生成，daily 总状态为 `failed`。
 - 网络或 AKShare 数据拉取 warning 会进入 daily warnings。
 - `--clean-proxy` 会在 daily 执行期间临时移除代理环境变量，并在 `daily_run_report.json` 记录 `clean_proxy` 和 `network_proxy_mode`。
+
+## V4.2 Local NAV Cache
+
+本次新增本地净值缓存系统，提升 AKShare、东方财富接口、代理或 DNS 异常时的日常稳定性。
+
+新增文件：
+
+- `data/nav_cache.json`：运行时自动生成，不提交 Git。
+
+新增命令：
+
+```bash
+python3 main.py cache-status
+python3 main.py cache-clear --yes
+```
+
+fallback 顺序：
+
+1. real 数据源
+2. `data/nav_cache.json`
+3. `nav_data.json`
+4. skipped / 数据缺失
+
+缓存规则：
+
+- 真实净值获取成功后自动写入缓存。
+- 支持 `unit_nav` 和 `accumulated_nav` 独立缓存。
+- run 缓存有效期默认 7 天，backtest 缓存有效期默认 90 天。
+- 缓存过期会 warning；fresh cache 在 daily 中作为 info，不直接导致失败。
+
+本次不修改补仓策略逻辑，不修改 portfolio-backtest 计算逻辑。

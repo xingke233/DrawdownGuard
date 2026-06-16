@@ -30,6 +30,9 @@ def run_daily_workflow(
         "clean_proxy": clean_proxy,
         "network_proxy_mode": "clean_proxy" if clean_proxy else "inherited_env",
         "run_step_source": None,
+        "cache_used": False,
+        "cache_stale": False,
+        "cache_last_updated": None,
         "steps": [],
         "final_report": final_report,
         "infos": [],
@@ -43,6 +46,9 @@ def run_daily_workflow(
             report["steps"].append(result)
             if result["name"] == "run":
                 report["run_step_source"] = result.get("result_source", "cached_or_previous")
+                report["cache_used"] = bool(result.get("cache_used"))
+                report["cache_stale"] = bool(result.get("cache_stale"))
+                report["cache_last_updated"] = result.get("cache_last_updated")
             report["infos"].extend(result.get("infos", []))
             report["warnings"].extend(result.get("warnings", []))
             report["errors"].extend(result.get("errors", []))

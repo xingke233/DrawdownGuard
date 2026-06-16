@@ -1144,3 +1144,46 @@ data/committee_report.json
 如果某一步失败，workflow 会记录 failed step，继续执行后续能执行的步骤；如果投委会报告无法生成，daily 状态为 `failed`。
 
 `--clean-proxy` 会在 daily 执行期间临时移除 `http_proxy`、`https_proxy`、`HTTP_PROXY`、`HTTPS_PROXY`、`all_proxy`、`ALL_PROXY`，用于排查代理环境导致的净值拉取问题。
+
+## V4.2 本地净值缓存
+
+Local NAV Cache 会在真实净值获取成功后自动写入 `data/nav_cache.json`。当 AKShare、东方财富接口、代理或 DNS 异常时，系统会优先使用最近一次成功缓存，提升每日检查稳定性。
+
+fallback 顺序：
+
+1. real 数据源
+2. `data/nav_cache.json`
+3. `nav_data.json`
+4. skipped / 数据缺失
+
+缓存支持不同净值口径：
+
+- `unit_nav`
+- `accumulated_nav`
+
+同一基金不同口径使用不同缓存 key，例如 `008163:unit_nav` 和 `008163:accumulated_nav`。
+
+配置项：
+
+```json
+"nav_cache": {
+  "enabled": true,
+  "max_age_days_for_run": 7,
+  "max_age_days_for_backtest": 90,
+  "min_history_for_run": 250
+}
+```
+
+命令：
+
+```bash
+python3 main.py cache-status
+python3 main.py cache-clear --yes
+```
+
+说明：
+
+- `run` 使用缓存超过 7 天会提示“缓存净值已过期，仅供参考”。
+- `portfolio-backtest` 使用缓存超过 90 天会提示过期。
+- run 使用缓存不足 250 条会提示阶段高点可能不准确。
+- `data/nav_cache.json` 是运行缓存文件，不提交到 Git。

@@ -10,5 +10,6 @@ data/*.json
 !data/current_holdings.json
 !data/dca_plan.json
 !data/policy_config.json
+data/nav_cache.json
 config.local.yaml
 *.backup.json
