@@ -1,6 +1,10 @@
 import argparse
+from contextlib import redirect_stdout
 from datetime import date
+from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
+import webbrowser
 
 from drawdownguard.backtest import (
     AssetBacktester,
@@ -16,6 +20,12 @@ from drawdownguard.backtest import (
 )
 from drawdownguard.asset_dca_audit import run_asset_dca_audit, summarize_asset_dca_audit
 from drawdownguard.committee_report import build_committee_report
+from drawdownguard.daily_workflow import (
+    build_network_debug_report,
+    format_daily_summary,
+    proxy_environment,
+    run_daily_workflow,
+)
 from drawdownguard.data_provider import NavDataProvider
 from drawdownguard.contribution import run_contribution_analysis, summarize_contribution_report
 from drawdownguard.dca_strategy_lab import (
@@ -86,7 +96,7 @@ def create_skipped_result(fund, nav_data):
     }
 
 
-def run_monitor(args):
+def run_monitor_execution(args, emit=True):
     storage, config, records, provider, strategy = build_app(args)
     results = []
 
@@ -113,11 +123,22 @@ def run_monitor(args):
     storage.save_records(records)
     storage.upsert_daily_logs(build_daily_log_entries(results))
     report = format_report(results, config)
-    print(report)
+    if emit:
+        print(report)
     email_status = send_daily_email(config, results)
-    if email_status.get("warning"):
+    if emit and email_status.get("warning"):
         print(f"警告：{email_status['warning']}")
-    return 0
+    return {
+        "code": 0,
+        "results": results,
+        "report": report,
+        "email_status": email_status,
+        "provider_class": provider.__class__.__name__,
+    }
+
+
+def run_monitor(args):
+    return run_monitor_execution(args, emit=True)["code"]
 
 
 def build_daily_log_entries(results):
@@ -286,6 +307,221 @@ def run_committee_report_command(args):
     print("投委会报告已写入 data/committee_report.md 和 data/committee_report.json")
     print(report["markdown"])
     return 0
+
+
+def run_daily_command(args):
+    storage = Storage(BASE_DIR)
+    steps = _daily_steps(args)
+    if args.debug_network:
+        with proxy_environment(args.clean_proxy):
+            _print_network_debug()
+    report = run_daily_workflow(
+        steps,
+        save_report=storage.save_daily_run_report,
+        final_report="data/committee_report.md",
+        conclusion_builder=_build_daily_conclusion,
+        clean_proxy=args.clean_proxy,
+    )
+    print(format_daily_summary(report))
+    if args.open_report:
+        _try_open_report(BASE_DIR / "data" / "committee_report.md")
+    return 0 if report["status"] != "failed" else 1
+
+
+def _daily_steps(args):
+    return [
+        {"name": "policy-check", "func": lambda: _daily_policy_check(args)},
+        {"name": "run", "func": lambda: _daily_run(args)},
+        {
+            "name": "portfolio-backtest",
+            "func": lambda: _daily_portfolio_backtest(args),
+            "skip": args.quick or args.skip_backtest,
+            "skip_message": "daily quick/skip-backtest 模式已跳过组合回测。",
+        },
+        {
+            "name": "contribution-report",
+            "func": _daily_contribution_report,
+            "skip": args.quick,
+            "skip_message": "daily quick 模式已跳过资产贡献分析。",
+        },
+        {"name": "rebalance-advice", "func": lambda: _daily_rebalance_advice(args)},
+        {"name": "committee-report", "func": lambda: _daily_committee_report(args)},
+    ]
+
+
+def _daily_policy_check(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    report = run_policy_checks(config)
+    if report.get("passed"):
+        return {"status": "success", "message": "配置检查通过。"}
+    return {
+        "status": "warning",
+        "message": "配置检查存在问题。",
+        "warnings": [item.get("message", "") for item in report.get("issues", [])],
+    }
+
+
+def _daily_run(args):
+    execution = run_monitor_execution(args, emit=False)
+    warnings = _run_result_warnings(execution.get("results", []))
+    if execution.get("code", 1) != 0:
+        return {
+            "status": "failed",
+            "message": "每日补仓检查失败。",
+            "warnings": warnings,
+            "result_source": "fresh_execution",
+        }
+    if warnings:
+        return {
+            "status": "warning",
+            "message": "每日补仓检查完成，但存在数据 warning。",
+            "warnings": warnings,
+            "result_source": "fresh_execution",
+            "provider_class": execution.get("provider_class"),
+        }
+    return {
+        "status": "success",
+        "message": "每日补仓检查完成。",
+        "result_source": "fresh_execution",
+        "provider_class": execution.get("provider_class"),
+    }
+
+
+def _daily_portfolio_backtest(args):
+    step_args = SimpleNamespace(
+        config=args.config,
+        nav_file=args.nav_file,
+        start_date=args.start_date or "2018-01-01",
+        end_date=None,
+    )
+    code, output = _capture_command_output(run_portfolio_backtest, step_args)
+    storage = Storage(BASE_DIR)
+    report = storage.load_portfolio_backtest_report()
+    warnings = _flatten_warnings(report.get("warnings", []))
+    if code != 0:
+        return {"status": "failed", "message": "组合回测失败。", "warnings": warnings}
+    if warnings or "净值数据缺失" in output:
+        return {"status": "warning", "message": "组合回测完成，但存在数据 warning。", "warnings": warnings or ["组合回测存在数据 warning。"]}
+    return {"status": "success", "message": "组合回测完成。"}
+
+
+def _daily_contribution_report():
+    storage = Storage(BASE_DIR)
+    portfolio_report = storage.load_portfolio_backtest_report()
+    if not portfolio_report:
+        return {
+            "status": "warning",
+            "message": "缺少 portfolio_backtest_report.json，已跳过资产贡献分析。",
+            "warnings": ["请先运行 portfolio-backtest 或 daily --start-date 2018-01-01。"],
+        }
+    report = run_contribution_analysis(portfolio_report)
+    storage.save_contribution_report(report)
+    return {"status": "success", "message": "资产贡献分析完成。"}
+
+
+def _daily_rebalance_advice(args):
+    _build_and_save_rebalance_advice(args.config)
+    return {"status": "success", "message": "再平衡建议完成。"}
+
+
+def _daily_committee_report(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    report = build_committee_report(
+        config,
+        policy_check_report=run_policy_checks(config),
+        daily_logs=storage.load_daily_logs(),
+        portfolio_backtest_report=storage.load_portfolio_backtest_report(),
+        contribution_report=storage.load_contribution_report(),
+        rebalance_advice=storage.load_rebalance_advice(),
+    )
+    storage.save_committee_report(report)
+    if not (BASE_DIR / "data" / "committee_report.md").exists():
+        return {"status": "failed", "message": "投委会 Markdown 报告未生成。"}
+    return {"status": "success", "message": "投委会报告完成。"}
+
+
+def _capture_command_output(func, args):
+    buffer = StringIO()
+    with redirect_stdout(buffer):
+        code = func(args)
+    return code, buffer.getvalue()
+
+
+def _latest_daily_logs(logs):
+    dated = [item for item in logs if item.get("date")]
+    if not dated:
+        return []
+    latest_date = max(item["date"] for item in dated)
+    return [item for item in dated if item.get("date") == latest_date]
+
+
+def _daily_log_warnings(logs):
+    warnings = []
+    for item in logs:
+        for warning in item.get("warnings", []) or []:
+            warnings.append(f"{item.get('fund_code')}: {warning}")
+    return warnings
+
+
+def _run_result_warnings(results):
+    warnings = []
+    for result in results:
+        for warning in result.get("warnings", []) or []:
+            warnings.append(f"{result.get('fund_code')}: {warning}")
+    return warnings
+
+
+def _flatten_warnings(items):
+    warnings = []
+    for item in items:
+        if isinstance(item, str):
+            warnings.append(item)
+            continue
+        for warning in item.get("warnings", []) or []:
+            warnings.append(f"{item.get('asset_id') or item.get('fund_code')}: {warning}")
+    return warnings
+
+
+def _build_daily_conclusion():
+    storage = Storage(BASE_DIR)
+    logs = _latest_daily_logs(storage.load_daily_logs())
+    rebalance = storage.load_rebalance_advice()
+    triggered = any(bool(item.get("suggestions")) for item in logs)
+    conclusion = rebalance.get("conclusion", {})
+    return {
+        "drawdown_triggered": triggered,
+        "needs_immediate_rebalance": conclusion.get("needs_immediate_rebalance"),
+        "future_dca_bias": conclusion.get("future_dca_bias"),
+    }
+
+
+def _print_network_debug():
+    debug = build_network_debug_report(provider_name="NavDataProvider")
+    print("Daily network debug")
+    print(f"http_proxy: {debug.get('http_proxy')}")
+    print(f"https_proxy: {debug.get('https_proxy')}")
+    print(f"no_proxy: {debug.get('no_proxy')}")
+    print(f"socket.getaddrinfo(fund.eastmoney.com, 443): {debug.get('fund_eastmoney_getaddrinfo')}")
+    print(f"requests proxies: {debug.get('requests_environ_proxies')}")
+    print(f"DataProvider: {debug.get('data_provider')}")
+    print(f"run_call_path: {debug.get('run_call_path')}")
+
+
+def _try_open_report(path):
+    if not path.exists():
+        print(f"报告不存在：{path}")
+        return
+    opened = False
+    try:
+        opened = webbrowser.open(path.resolve().as_uri())
+    except Exception:
+        opened = False
+    if opened:
+        print(f"已尝试打开报告：{path}")
+    else:
+        print(f"当前环境无法自动打开报告，请手动查看：{path}")
 
 
 def run_backtest(args):
@@ -1023,6 +1259,15 @@ def parse_args():
 
     committee_report_parser = subparsers.add_parser("committee-report", help="生成个人投委会报告")
     committee_report_parser.set_defaults(func=run_committee_report_command)
+
+    daily_parser = subparsers.add_parser("daily", help="运行一键每日工作流")
+    daily_parser.add_argument("--start-date", default="2018-01-01", help="组合回测开始日期，默认 2018-01-01")
+    daily_parser.add_argument("--skip-backtest", action="store_true", help="跳过组合回测，使用已有回测报告")
+    daily_parser.add_argument("--quick", action="store_true", help="快速模式：跳过组合回测和资产贡献分析")
+    daily_parser.add_argument("--open-report", action="store_true", help="尝试打开 data/committee_report.md")
+    daily_parser.add_argument("--clean-proxy", action="store_true", help="daily 执行期间临时移除代理环境变量")
+    daily_parser.add_argument("--debug-network", action="store_true", help="输出 daily 网络环境和 DNS 诊断信息")
+    daily_parser.set_defaults(func=run_daily_command)
 
     backtest_parser = subparsers.add_parser("backtest", help="运行历史回测")
     backtest_parser.set_defaults(func=run_backtest)

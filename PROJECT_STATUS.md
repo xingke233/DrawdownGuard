@@ -385,3 +385,43 @@ python3 main.py committee-report
 - 风险提示
 
 缺失的上游报告会显示“暂无数据，请先运行对应命令”，不会导致命令失败。
+
+## V4.0 Daily Workflow
+
+系统进入“日常使用阶段”。新增一键每日工作流，用于把配置检查、每日补仓检查、组合回测、资产贡献、再平衡建议和投委会报告串联执行。
+
+新增命令：
+
+```bash
+python3 main.py daily
+python3 main.py daily --quick
+python3 main.py daily --start-date 2018-01-01
+python3 main.py daily --skip-backtest
+python3 main.py daily --open-report
+python3 main.py daily --quick --clean-proxy
+```
+
+默认流程：
+
+1. `policy-check`
+2. `run`
+3. `portfolio-backtest`
+4. `contribution-report`
+5. `rebalance-advice`
+6. `committee-report`
+
+`--quick` 模式跳过组合回测和资产贡献分析，适合日常快速检查。
+
+新增输出：
+
+- `data/daily_run_report.json`
+- `data/committee_report.md`
+- `data/committee_report.json`
+
+错误处理：
+
+- 单步失败不会直接终止 workflow。
+- failed step 会写入 `daily_run_report.json`。
+- 如果 `committee-report` 无法生成，daily 总状态为 `failed`。
+- 网络或 AKShare 数据拉取 warning 会进入 daily warnings。
+- `--clean-proxy` 会在 daily 执行期间临时移除代理环境变量，并在 `daily_run_report.json` 记录 `clean_proxy` 和 `network_proxy_mode`。

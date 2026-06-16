@@ -110,6 +110,12 @@ class Storage:
     def load_committee_report(self):
         return self._load_json("committee_report.json", {})
 
+    def save_daily_run_report(self, report):
+        self._save_json("daily_run_report.json", report)
+
+    def load_daily_run_report(self):
+        return self._load_json("daily_run_report.json", {})
+
     def save_fund_check_report(self, report):
         self._save_json("fund_check_report.json", report)
 

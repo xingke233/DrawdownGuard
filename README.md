@@ -1092,3 +1092,55 @@ data/committee_report.json
 - 风险提示
 
 如果某个上游报告不存在，投委会报告会显示“暂无数据，请先运行对应命令”，不会中断生成。
+
+## V4.0 Daily Workflow
+
+`daily` 命令把每日常用流程合并为一键执行。它只编排已有功能，不自动交易，不改变补仓策略或组合回测计算。
+
+日常快速检查推荐：
+
+```bash
+python3 main.py daily --quick
+```
+
+每周或每月完整运行：
+
+```bash
+python3 main.py daily --start-date 2018-01-01
+```
+
+可选参数：
+
+```bash
+python3 main.py daily --skip-backtest
+python3 main.py daily --quick --clean-proxy
+python3 main.py daily --open-report
+```
+
+默认流程：
+
+1. `policy-check`
+2. `run`
+3. `portfolio-backtest`
+4. `contribution-report`
+5. `rebalance-advice`
+6. `committee-report`
+
+`--quick` 流程：
+
+1. `policy-check`
+2. `run`
+3. `rebalance-advice`
+4. `committee-report`
+
+新增输出：
+
+```text
+data/daily_run_report.json
+data/committee_report.md
+data/committee_report.json
+```
+
+如果某一步失败，workflow 会记录 failed step，继续执行后续能执行的步骤；如果投委会报告无法生成，daily 状态为 `failed`。
+
+`--clean-proxy` 会在 daily 执行期间临时移除 `http_proxy`、`https_proxy`、`HTTP_PROXY`、`HTTPS_PROXY`、`all_proxy`、`ALL_PROXY`，用于排查代理环境导致的净值拉取问题。
