@@ -6,5 +6,9 @@ reports/backtest_plots/*
 !reports/backtest_plots/.gitkeep
 data/*.json
 !data/.gitkeep
+!data/user_profile.json
+!data/current_holdings.json
+!data/dca_plan.json
+!data/policy_config.json
 config.local.yaml
 *.backup.json

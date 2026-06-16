@@ -1,0 +1,22 @@
+{
+  "version": "2026-06 投委会最终版",
+  "weekly_day": "Thursday",
+  "weekly_day_index": 3,
+  "weekly": [
+    {"asset_id": "NASDAQ100", "fund_code": "270042", "fund_name": "广发纳斯达克100ETF联接A", "amount": 10},
+    {"asset_id": "NASDAQ100", "fund_code": "012752", "fund_name": "建信纳斯达克100指数C(QDII)", "amount": 40},
+    {"asset_id": "HSTECH", "fund_code": "012349", "fund_name": "天弘恒生科技ETF联接(QDII)C", "amount": 25},
+    {"asset_id": "DIVIDEND_LOW_VOL", "fund_code": "008163", "fund_name": "南方红利低波50ETF联接A", "amount": 20},
+    {"asset_id": "CASHFLOW", "fund_code": "023918", "fund_name": "华夏国证自由现金流ETF联接C", "amount": 30}
+  ],
+  "monthly": [
+    {"asset_id": "GOLD", "fund_code": "000216", "fund_name": "华安黄金ETF联接A", "amount": 40, "day": 1}
+  ],
+  "weight_notes": {
+    "NASDAQ100": "50 元/周，约 37%",
+    "CASHFLOW": "30 元/周，约 22%",
+    "HSTECH": "25 元/周，约 19%",
+    "DIVIDEND_LOW_VOL": "20 元/周，约 15%",
+    "GOLD": "40 元/月，约 7%"
+  }
+}

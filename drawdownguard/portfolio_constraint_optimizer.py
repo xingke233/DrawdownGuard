@@ -22,6 +22,11 @@ def default_optimizer_workers():
 
 def run_portfolio_constraint_optimizer(portfolio_report, dca_report, preset="quick", workers=1):
     assets = _asset_metrics(portfolio_report, dca_report)
+    baseline_weights = {
+        asset_id: item.get("current_weight", 0)
+        for asset_id, item in assets.items()
+        if item.get("current_weight", 0) > 0
+    }
     candidates = generate_weight_candidates(preset, assets.keys())
     tasks = [(candidate, assets) for candidate in candidates]
     if workers and workers > 1 and len(tasks) > 1:
@@ -49,6 +54,7 @@ def run_portfolio_constraint_optimizer(portfolio_report, dca_report, preset="qui
             "min_bullet_cash_weight": MIN_BULLET_CASH_WEIGHT,
             "high_volatility_weight_limit": HIGH_VOL_LIMIT,
         },
+        "baseline_current_weights": baseline_weights,
         "modes": {key: _compact_result(value) for key, value in modes.items()},
         "recommendations": {
             "best_portfolio": _compact_result(modes["balanced_mode"]),
@@ -57,6 +63,10 @@ def run_portfolio_constraint_optimizer(portfolio_report, dca_report, preset="qui
         },
         "binding_constraints": binding_constraints(ranked[0] if ranked else None),
         "compressed_assets": compressed_assets(ranked[0] if ranked else None),
+        "best_weight_deltas_vs_current": weight_deltas(
+            (ranked[0] if ranked else {}).get("asset_weights", {}),
+            baseline_weights,
+        ),
         "top_results": [_compact_result(item) for item in ranked[:10]],
         "all_results": [_compact_result(item) for item in evaluated],
         "explanation": build_explanation(ranked[0] if ranked else None, len(feasible), len(evaluated)),
@@ -134,6 +144,12 @@ def summarize_portfolio_optimize_report(report):
         )
     best = report.get("recommendations", {}).get("best_portfolio", {})
     lines.append(f"最优组合：{best.get('candidate_id')}")
+    deltas = report.get("best_weight_deltas_vs_current", {})
+    if deltas:
+        lines.append(
+            "相对当前权重调整："
+            + ", ".join(f"{asset_id} {_fmt_pct(delta)}" for asset_id, delta in sorted(deltas.items()))
+        )
     lines.append(f"binding constraints：{', '.join(report.get('binding_constraints', [])) or '无'}")
     lines.append(f"自动压缩权重资产：{', '.join(report.get('compressed_assets', [])) or '无'}")
     lines.append(f"解释：{report.get('explanation')}")
@@ -162,6 +178,14 @@ def compressed_assets(result):
         asset_id for asset_id, status in result["constraints"].get("asset_limit_status", {}).items()
         if abs(status["weight"] - status["limit"]) <= 0.01
     ]
+
+
+def weight_deltas(target_weights, current_weights):
+    asset_ids = sorted(set(target_weights) | set(current_weights))
+    return {
+        asset_id: target_weights.get(asset_id, 0) - current_weights.get(asset_id, 0)
+        for asset_id in asset_ids
+    }
 
 
 def build_explanation(best, feasible_count, tested_count):
@@ -220,6 +244,7 @@ def _asset_metrics(portfolio_report, dca_report):
             "return": return_rate or 0,
             "drawdown": drawdown or 0,
             "volatility": volatility or 0,
+            "current_weight": asset.get("current_weight", 0),
         }
     return metrics
 

@@ -1,0 +1,103 @@
+{
+  "version": "2026-06 投委会最终版",
+  "holdings": [
+    {
+      "asset_id": "CASH",
+      "asset_name": "余额宝",
+      "amount": 1883,
+      "weight": 0.1756,
+      "role": "bullet_cash",
+      "funds": []
+    },
+    {
+      "asset_id": "NASDAQ100",
+      "asset_name": "纳斯达克100",
+      "amount": 2181,
+      "weight": 0.2035,
+      "role": "core_growth",
+      "funds": [
+        {"code": "270042", "name": "广发纳斯达克100ETF联接(QDII)A", "amount": 2038, "weight": 0.1901, "role": "core_growth"},
+        {"code": "012752", "name": "建信纳斯达克100指数C(QDII)", "amount": 143, "weight": 0.0134, "role": "core_growth"}
+      ]
+    },
+    {
+      "asset_id": "HSTECH",
+      "asset_name": "恒生科技",
+      "amount": 290,
+      "weight": 0.0271,
+      "role": "satellite_opportunity",
+      "holding_horizon": "1-3 years",
+      "funds": [
+        {"code": "012349", "name": "天弘恒生科技ETF联接(QDII)C", "amount": 290, "weight": 0.0271, "role": "satellite_opportunity"}
+      ]
+    },
+    {
+      "asset_id": "CASHFLOW",
+      "asset_name": "自由现金流",
+      "amount": 574,
+      "weight": 0.0536,
+      "role": "quality_factor",
+      "funds": [
+        {"code": "023918", "name": "华夏国证自由现金流ETF联接C", "amount": 574, "weight": 0.0536, "role": "quality_factor"}
+      ]
+    },
+    {
+      "asset_id": "DIVIDEND_LOW_VOL",
+      "asset_name": "红利低波",
+      "amount": 419,
+      "weight": 0.0390,
+      "role": "value_factor",
+      "nav_mode": "accumulated_nav",
+      "funds": [
+        {"code": "008163", "name": "南方红利低波50ETF联接A", "amount": 419, "weight": 0.0390, "role": "value_factor", "nav_mode": "accumulated_nav"}
+      ]
+    },
+    {
+      "asset_id": "ACTIVE_ADVANCED_MANUFACTURING",
+      "asset_name": "先进制造",
+      "amount": 542,
+      "weight": 0.0505,
+      "role": "active_fund",
+      "funds": [
+        {"code": "018125", "name": "永赢先进制造智选混合C", "amount": 542, "weight": 0.0505, "role": "active_fund"}
+      ]
+    },
+    {
+      "asset_id": "NONFERROUS_METALS",
+      "asset_name": "有色金属",
+      "amount": 106,
+      "weight": 0.0099,
+      "role": "cyclical_theme",
+      "funds": [
+        {"code": "016708", "name": "华夏有色金属ETF联接C", "amount": 106, "weight": 0.0099, "role": "cyclical_theme"}
+      ]
+    },
+    {
+      "asset_id": "GOLD",
+      "asset_name": "黄金",
+      "amount": 763,
+      "weight": 0.0712,
+      "role": "hedge",
+      "nav_mode": "unit_nav",
+      "funds": [
+        {"code": "000216", "name": "华安黄金ETF联接A", "amount": 763, "weight": 0.0712, "role": "hedge", "nav_mode": "unit_nav"}
+      ]
+    },
+    {
+      "asset_id": "BONDS",
+      "asset_name": "债券",
+      "amount": 3963,
+      "weight": 0.3696,
+      "role": "bond_stabilizer",
+      "funds": [
+        {"code": "110017", "name": "易方达增强回报债券A", "amount": 2761, "weight": 0.2575, "role": "bond_stabilizer"},
+        {"code": "420102", "name": "天弘永利债券B", "amount": 876, "weight": 0.0817, "role": "bond_stabilizer"},
+        {"code": "000546", "name": "兴业定期开放债券A", "amount": 326, "weight": 0.0304, "role": "bond_stabilizer"}
+      ]
+    }
+  ],
+  "cleared_assets": [
+    "东方人工智能主题混合C",
+    "国投瑞银白银期货LOF"
+  ]
+}

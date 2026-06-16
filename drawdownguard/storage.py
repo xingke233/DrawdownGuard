@@ -1,5 +1,7 @@
 import json
 
+from .real_config import apply_real_profile, load_real_profile_files
+
 
 class Storage:
     def __init__(self, base_dir):
@@ -10,12 +12,19 @@ class Storage:
         path = self.base_dir / filename
         with path.open("r", encoding="utf-8") as file:
             config = json.load(file)
+        config = apply_real_profile(config, load_real_profile_files(self))
         bullet_balance = int(config["bullet_account"]["balance"])
         for fund in config["funds"]:
             fund["bullet_balance"] = bullet_balance
         return config
 
     def save_config(self, config, filename="config.yaml"):
+        if config.get("real_config_version"):
+            profile = self._load_json("user_profile.json", {})
+            if profile.get("bullet_cash") is not None:
+                profile["bullet_cash"]["amount"] = int(config.get("bullet_account", {}).get("balance", 0))
+                self._save_json("user_profile.json", profile)
+            return
         path = self.base_dir / filename
         clean_config = dict(config)
         clean_funds = []

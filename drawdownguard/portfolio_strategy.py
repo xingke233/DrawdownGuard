@@ -4,6 +4,10 @@ ASSET_ROLES = {
     "DIVIDEND_LOW_VOL": "defensive",
     "HSTECH": "satellite",
     "CASHFLOW": "experimental",
+    "ACTIVE_ADVANCED_MANUFACTURING": "satellite",
+    "NONFERROUS_METALS": "satellite",
+    "BONDS": "defensive",
+    "CASH": "cash",
 }
 
 STRATEGY_WEIGHTS = {

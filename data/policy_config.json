@@ -1,0 +1,21 @@
+{
+  "version": "2026-06 投委会最终版",
+  "drawdown_buy_policy": {
+    "stage_high_window": 250,
+    "strategy_activation_date": "2026-06-09",
+    "allowed_fund_codes": ["270042", "012752", "012349"],
+    "blocked_fund_codes": ["023918", "008163", "000216", "110017", "420102", "000546", "018125", "016708"],
+    "levels": [
+      {"drawdown": -0.10, "drawdown_percent": 10, "cash_ratio": 0.15},
+      {"drawdown": -0.15, "drawdown_percent": 15, "cash_ratio": 0.25},
+      {"drawdown": -0.20, "drawdown_percent": 20, "cash_ratio": 0.35}
+    ],
+    "rules": [
+      "每档只触发一次",
+      "创新高后重置",
+      "启用日前已经发生的历史回撤不追补",
+      "子弹仓使用余额宝资金",
+      "生活账户永不参与"
+    ]
+  }
+}

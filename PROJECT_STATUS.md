@@ -293,3 +293,37 @@ Windows 任务计划程序建议：
 # 准备 nav_data.json 后运行
 python3 main.py run
 ```
+
+## V3.7 Real Portfolio Profile Integration
+
+本次为配置层、资产层和真实持仓层接入，不改变现有策略计算逻辑。
+
+当前真实配置版本：`2026-06 投委会最终版`。
+
+新增真实配置文件：
+
+- `data/user_profile.json`：投资者画像、余额宝子弹仓、生活账户隔离规则。
+- `data/current_holdings.json`：真实持仓、资产分组、角色、当前金额和权重。
+- `data/dca_plan.json`：真实定投计划，每周四定投，黄金每月 1 日定投。
+- `data/policy_config.json`：允许补仓/禁止补仓基金与 10/15/20 回撤补仓规则。
+
+新增命令：
+
+```bash
+python3 main.py profile-report
+python3 main.py holdings-report
+python3 main.py policy-check
+```
+
+接入结果：
+
+- 子弹仓已更新为余额宝 `1883` 元。
+- 生活账户 `investable=false`，不进入补仓、回测、优化或再平衡计算。
+- NASDAQ100 已按资产合并 `270042 + 012752`；组合回测使用 `270042` 作为代表净值。
+- 真实组合回测支持每周四定投，并支持黄金 `000216` 每月 1 日定投。
+- 红利低波 `008163` 使用 `accumulated_nav`。
+- `portfolio-backtest`、`portfolio-report`、`portfolio-strategy-synth` 和 `portfolio-optimize` 可读取真实配置生成的资产字段。
+
+允许补仓基金：`270042`、`012752`、`012349`。
+
+禁止补仓基金：`023918`、`008163`、`000216`、`110017`、`420102`、`000546`、`018125`、`016708`。

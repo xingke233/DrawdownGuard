@@ -995,3 +995,38 @@ python3 main.py backtest-scenarios
 ```
 
 如果 Linux 环境没有中文字体，图表中的中文基金名称可能显示为方框；可安装 Noto CJK 或文泉驿字体后重新生成图表。
+
+## V3.7 真实账户配置接入
+
+真实账户配置已从代码中拆出，集中放在 `data/`：
+
+```text
+data/user_profile.json       # 投资者画像、子弹仓、生活账户隔离
+data/current_holdings.json   # 当前真实持仓、资产分组、角色和 nav_mode
+data/dca_plan.json           # 每周四/每月1日定投计划
+data/policy_config.json      # 允许补仓资产、禁止补仓资产和回撤补仓规则
+```
+
+当前配置版本：`2026-06 投委会最终版`。
+
+常用命令：
+
+```bash
+python3 main.py profile-report
+python3 main.py holdings-report
+python3 main.py policy-check
+python3 main.py portfolio-backtest --start-date 2018-01-01
+python3 main.py portfolio-report
+```
+
+真实配置要点：
+
+- 子弹仓账户为余额宝，金额 `1883` 元；生活账户不参与补仓、回测、优化或再平衡计算。
+- NASDAQ100 合并 `270042` 和 `012752`，组合回测仍使用 `270042` 作为资产代表净值。
+- 真实定投计划使用每周四：`270042` 10 元、`012752` 40 元、`012349` 25 元、`008163` 20 元、`023918` 30 元。
+- 黄金 `000216` 使用每月 1 日定投 40 元。
+- `DIVIDEND_LOW_VOL` 默认使用 `accumulated_nav`，其余当前定投资产默认使用 `unit_nav`。
+- 允许补仓基金：`270042`、`012752`、`012349`。
+- 禁止补仓基金：`023918`、`008163`、`000216`、`110017`、`420102`、`000546`、`018125`、`016708`。
+
+更新真实持仓时，只修改 `data/current_holdings.json`、`data/dca_plan.json` 和 `data/policy_config.json`，不要把真实配置写进 Python 代码。

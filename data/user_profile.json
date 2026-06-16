@@ -1,0 +1,31 @@
+{
+  "version": "2026-06 投委会最终版",
+  "investor_profile": {
+    "age": 20,
+    "horizon_years": "10+",
+    "target_annual_return": 0.10,
+    "max_account_drawdown_tolerance": 0.30,
+    "style": "growth",
+    "life_account_separated": true,
+    "life_account_investable": false,
+    "bullet_cash_account": "余额宝",
+    "principles": [
+      "长期看好科技创新",
+      "以指数基金为核心",
+      "定投为主",
+      "回撤补仓为辅",
+      "不短线择时",
+      "不情绪化操作",
+      "系统目标是控制风险，不是预测市场"
+    ]
+  },
+  "bullet_cash": {
+    "account_name": "余额宝",
+    "amount": 1883,
+    "role": "drawdown reserve",
+    "investable": true
+  },
+  "life_account": {
+    "investable": false
+  }
+}

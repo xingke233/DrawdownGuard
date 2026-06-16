@@ -39,6 +39,12 @@ from drawdownguard.portfolio_strategy import (
     run_portfolio_strategy_synth,
     summarize_portfolio_strategy_report,
 )
+from drawdownguard.real_config import (
+    run_policy_checks,
+    summarize_holdings_report,
+    summarize_policy_check,
+    summarize_profile,
+)
 from drawdownguard.risk_compare import run_risk_compare, summarize_risk_compare_report
 from drawdownguard.storage import Storage
 from drawdownguard.strategy import DrawdownStrategy
@@ -213,6 +219,28 @@ def show_daily_logs(args):
     return 0
 
 
+def show_profile_report(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    print(summarize_profile(config))
+    return 0
+
+
+def show_holdings_report(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    print(summarize_holdings_report(config))
+    return 0
+
+
+def run_policy_check_command(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    report = run_policy_checks(config)
+    print(summarize_policy_check(report))
+    return 0 if report.get("passed") else 1
+
+
 def run_backtest(args):
     storage = Storage(BASE_DIR)
     config = storage.load_config(args.config)
@@ -380,6 +408,18 @@ def collect_portfolio_histories(portfolio_config, provider):
             )
         if nav_data["history"]:
             histories[fund_code] = nav_data["history"]
+        for schedule in asset.get("dca_schedules", []):
+            schedule_code = schedule.get("fund_code")
+            if schedule_code and schedule_code != fund_code:
+                warnings.append(
+                    {
+                        "asset_id": asset.get("asset_id"),
+                        "fund_code": schedule_code,
+                        "warnings": [
+                            f"{schedule_code} 定投在资产级回测中使用代表基金 {fund_code} 净值作为 fallback。"
+                        ],
+                    }
+                )
     return histories, warnings
 
 
@@ -918,6 +958,15 @@ def parse_args():
 
     logs_parser = subparsers.add_parser("logs", help="查看最近10条每日检查日志")
     logs_parser.set_defaults(func=show_daily_logs)
+
+    profile_parser = subparsers.add_parser("profile-report", help="查看真实账户画像和策略配置")
+    profile_parser.set_defaults(func=show_profile_report)
+
+    holdings_parser = subparsers.add_parser("holdings-report", help="查看真实持仓明细和资产汇总")
+    holdings_parser.set_defaults(func=show_holdings_report)
+
+    policy_check_parser = subparsers.add_parser("policy-check", help="检查真实配置是否符合补仓和账户隔离规则")
+    policy_check_parser.set_defaults(func=run_policy_check_command)
 
     backtest_parser = subparsers.add_parser("backtest", help="运行历史回测")
     backtest_parser.set_defaults(func=run_backtest)

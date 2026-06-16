@@ -230,11 +230,14 @@ class PortfolioBacktester:
         skipped_assets = [
             {
                 "asset_id": state["asset_id"],
-                "asset_name": state["asset_name"],
-                "representative_fund": state["representative_fund"],
-                "nav_mode": state["nav_mode"],
-                "skip_reason": state["skip_reason"],
-            }
+            "asset_name": state["asset_name"],
+            "representative_fund": state["representative_fund"],
+            "nav_mode": state["nav_mode"],
+            "role": state.get("role"),
+            "current_amount": state.get("current_amount", 0),
+            "current_weight": state.get("current_weight", 0),
+            "skip_reason": state["skip_reason"],
+        }
             for state in asset_states
             if state["status"] == "skipped"
         ]
@@ -294,8 +297,13 @@ class PortfolioBacktester:
             "asset_name": asset["asset_name"],
             "representative_fund": representative_fund,
             "nav_mode": asset.get("nav_mode", "unit_nav"),
+            "role": asset.get("role"),
+            "current_amount": float(asset.get("current_amount", 0)),
+            "current_weight": float(asset.get("current_weight", 0)),
             "strategy": asset.get("strategy", "dca_only"),
             "weekly_dca_amount": int(asset.get("weekly_dca_amount", 0)),
+            "dca_schedules": self._build_dca_schedules(asset),
+            "dca_schedule_states": [],
             "status": "active",
             "skip_reason": None,
             "history": [],
@@ -336,12 +344,77 @@ class PortfolioBacktester:
         base_state["history"] = sorted(history, key=lambda item: item["date"])
         base_state["nav_by_date"] = {item["date"]: item["nav"] for item in base_state["history"]}
         base_state["next_dca_date"] = self._initial_dca_date(base_state["history"][0]["date"])
+        base_state["dca_schedule_states"] = self._initialize_dca_schedule_states(
+            base_state["dca_schedules"],
+            base_state["history"][0]["date"],
+        )
         base_state["levels"] = levels
         base_state["triggered_levels"] = {level: False for level, _ in levels}
         base_state["trigger_count_by_level"] = {level: 0 for level, _ in levels}
         return base_state
 
     def _process_asset_day(self, state, current_date, nav, bullet_cash):
+        if state.get("dca_schedule_states"):
+            self._process_scheduled_dca(state, current_date, nav, bullet_cash)
+        else:
+            self._process_legacy_weekly_dca(state, current_date, nav, bullet_cash)
+
+        peak_nav, previous_peak = self._rolling_peaks(state, current_date, nav)
+        if nav > previous_peak:
+            state["triggered_levels"] = {level: False for level, _ in state["levels"]}
+
+        drawdown = (nav - peak_nav) / peak_nav if peak_nav else 0
+        if state["strategy"] == "drawdown_plus_dca":
+            bullet_cash = self._process_drawdown_buy(state, current_date, nav, drawdown, peak_nav, bullet_cash)
+
+        state["series"].append(
+            {
+                "date": current_date,
+                "nav": nav,
+                "peak_nav": peak_nav,
+                "drawdown": drawdown,
+                "bullet_cash_after": bullet_cash,
+            }
+        )
+        return bullet_cash
+
+    def _process_scheduled_dca(self, state, current_date, nav, bullet_cash):
+        current_day = date.fromisoformat(current_date)
+        for schedule_state in state["dca_schedule_states"]:
+            if current_day < schedule_state["next_date"]:
+                continue
+            schedule = schedule_state["schedule"]
+            amount = int(schedule.get("amount", 0))
+            if amount > 0:
+                shares = amount / nav if nav else 0
+                state["dca_invested"] += amount
+                state["total_shares"] += shares
+                state["events"].append(
+                    {
+                        "date": current_date,
+                        "type": "dca",
+                        "nav": nav,
+                        "amount": amount,
+                        "shares": shares,
+                        "level": None,
+                        "drawdown": None,
+                        "bullet_cash_after": bullet_cash,
+                        "fund_code": schedule.get("fund_code", state["representative_fund"]),
+                        "fund_name": schedule.get("fund_name", state["asset_name"]),
+                        "frequency": schedule.get("frequency", "weekly"),
+                    }
+                )
+            schedule_state["next_date"] = self._advance_schedule_date(
+                schedule,
+                schedule_state["next_date"],
+            )
+            while current_day >= schedule_state["next_date"]:
+                schedule_state["next_date"] = self._advance_schedule_date(
+                    schedule,
+                    schedule_state["next_date"],
+                )
+
+    def _process_legacy_weekly_dca(self, state, current_date, nav, bullet_cash):
         if date.fromisoformat(current_date) >= state["next_dca_date"]:
             amount = state["weekly_dca_amount"]
             if amount > 0:
@@ -363,25 +436,6 @@ class PortfolioBacktester:
             state["next_dca_date"] += timedelta(days=7)
             while date.fromisoformat(current_date) >= state["next_dca_date"]:
                 state["next_dca_date"] += timedelta(days=7)
-
-        peak_nav, previous_peak = self._rolling_peaks(state, current_date, nav)
-        if nav > previous_peak:
-            state["triggered_levels"] = {level: False for level, _ in state["levels"]}
-
-        drawdown = (nav - peak_nav) / peak_nav if peak_nav else 0
-        if state["strategy"] == "drawdown_plus_dca":
-            bullet_cash = self._process_drawdown_buy(state, current_date, nav, drawdown, peak_nav, bullet_cash)
-
-        state["series"].append(
-            {
-                "date": current_date,
-                "nav": nav,
-                "peak_nav": peak_nav,
-                "drawdown": drawdown,
-                "bullet_cash_after": bullet_cash,
-            }
-        )
-        return bullet_cash
 
     def _process_drawdown_buy(self, state, current_date, nav, drawdown, peak_nav, bullet_cash):
         drawdown_percent = abs(drawdown * 100)
@@ -429,6 +483,9 @@ class PortfolioBacktester:
                 "representative_fund": state["representative_fund"],
                 "nav_mode": state["nav_mode"],
                 "strategy": state["strategy"],
+                "role": state.get("role"),
+                "current_amount": state.get("current_amount", 0),
+                "current_weight": state.get("current_weight", 0),
                 "status": "skipped",
                 "skip_reason": state["skip_reason"],
                 "dca_invested": 0,
@@ -454,6 +511,9 @@ class PortfolioBacktester:
             "representative_fund": state["representative_fund"],
             "nav_mode": state["nav_mode"],
             "strategy": state["strategy"],
+            "role": state.get("role"),
+            "current_amount": state.get("current_amount", 0),
+            "current_weight": state.get("current_weight", 0),
             "status": "active",
             "skip_reason": None,
             "start_date": state["history"][0]["date"],
@@ -481,6 +541,52 @@ class PortfolioBacktester:
         if (first_available - requested_start).days > 7:
             return first_available
         return _next_weekday(requested_start, self.dca_weekday)
+
+    def _build_dca_schedules(self, asset):
+        schedules = asset.get("dca_schedules") or []
+        if schedules:
+            return [dict(item) for item in schedules]
+        weekly_amount = int(asset.get("weekly_dca_amount", 0))
+        if weekly_amount <= 0:
+            return []
+        return [
+            {
+                "asset_id": asset.get("asset_id"),
+                "fund_code": asset.get("representative_fund"),
+                "fund_name": asset.get("asset_name"),
+                "amount": weekly_amount,
+                "frequency": "weekly",
+                "weekday": self.dca_weekday,
+            }
+        ]
+
+    def _initialize_dca_schedule_states(self, schedules, first_history_date):
+        return [
+            {
+                "schedule": schedule,
+                "next_date": self._initial_schedule_date(schedule, first_history_date),
+            }
+            for schedule in schedules
+        ]
+
+    def _initial_schedule_date(self, schedule, first_history_date):
+        requested_start = date.fromisoformat(self.start_date)
+        first_available = date.fromisoformat(first_history_date)
+        if (first_available - requested_start).days > 31:
+            return first_available
+        if schedule.get("frequency") == "monthly":
+            day = int(schedule.get("day", 1))
+            next_date = _month_date(requested_start.year, requested_start.month, day)
+            if next_date < requested_start:
+                next_date = _add_month(next_date, day)
+            return next_date
+        weekday = int(schedule.get("weekday", self.dca_weekday))
+        return _next_weekday(requested_start, weekday)
+
+    def _advance_schedule_date(self, schedule, current_next_date):
+        if schedule.get("frequency") == "monthly":
+            return _add_month(current_next_date, int(schedule.get("day", 1)))
+        return current_next_date + timedelta(days=7)
 
 
 def summarize_backtest_report(report):
@@ -744,3 +850,18 @@ def _sum_return_rate(funds):
 def _next_weekday(value, weekday):
     days_until_weekday = (weekday - value.weekday()) % 7
     return value + timedelta(days=days_until_weekday)
+
+
+def _month_date(year, month, day):
+    if month == 12:
+        next_month = date(year + 1, 1, 1)
+    else:
+        next_month = date(year, month + 1, 1)
+    last_day = (next_month - timedelta(days=1)).day
+    return date(year, month, min(day, last_day))
+
+
+def _add_month(value, day):
+    year = value.year + (1 if value.month == 12 else 0)
+    month = 1 if value.month == 12 else value.month + 1
+    return _month_date(year, month, day)
