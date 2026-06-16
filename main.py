@@ -356,9 +356,9 @@ def _daily_policy_check(args):
     if report.get("passed"):
         return {"status": "success", "message": "配置检查通过。"}
     return {
-        "status": "warning",
+        "status": "failed",
         "message": "配置检查存在问题。",
-        "warnings": [item.get("message", "") for item in report.get("issues", [])],
+        "errors": [item.get("message", "") for item in report.get("issues", [])],
     }
 
 
@@ -398,12 +398,12 @@ def _daily_portfolio_backtest(args):
     code, output = _capture_command_output(run_portfolio_backtest, step_args)
     storage = Storage(BASE_DIR)
     report = storage.load_portfolio_backtest_report()
-    warnings = _flatten_warnings(report.get("warnings", []))
+    infos, warnings = _split_portfolio_messages(report.get("warnings", []))
     if code != 0:
-        return {"status": "failed", "message": "组合回测失败。", "warnings": warnings}
+        return {"status": "failed", "message": "组合回测失败。", "warnings": warnings, "infos": infos}
     if warnings or "净值数据缺失" in output:
-        return {"status": "warning", "message": "组合回测完成，但存在数据 warning。", "warnings": warnings or ["组合回测存在数据 warning。"]}
-    return {"status": "success", "message": "组合回测完成。"}
+        return {"status": "warning", "message": "组合回测完成，但存在数据 warning。", "warnings": warnings or ["组合回测存在数据 warning。"], "infos": infos}
+    return {"status": "success", "message": "组合回测完成。", "infos": infos}
 
 
 def _daily_contribution_report():
@@ -438,7 +438,7 @@ def _daily_committee_report(args):
     )
     storage.save_committee_report(report)
     if not (BASE_DIR / "data" / "committee_report.md").exists():
-        return {"status": "failed", "message": "投委会 Markdown 报告未生成。"}
+        return {"status": "failed", "message": "投委会 Markdown 报告未生成。", "errors": ["投委会 Markdown 报告未生成。"]}
     return {"status": "success", "message": "投委会报告完成。"}
 
 
@@ -482,6 +482,21 @@ def _flatten_warnings(items):
         for warning in item.get("warnings", []) or []:
             warnings.append(f"{item.get('asset_id') or item.get('fund_code')}: {warning}")
     return warnings
+
+
+def _split_portfolio_messages(items):
+    infos = []
+    warnings = []
+    for item in _flatten_warnings(items):
+        if _is_info_message(item):
+            infos.append(item)
+        else:
+            warnings.append(item)
+    return infos, warnings
+
+
+def _is_info_message(message):
+    return "012752 定投在资产级回测中使用代表基金 270042 净值作为 fallback" in message
 
 
 def _build_daily_conclusion():

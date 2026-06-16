@@ -32,6 +32,7 @@ def run_daily_workflow(
         "run_step_source": None,
         "steps": [],
         "final_report": final_report,
+        "infos": [],
         "warnings": [],
         "errors": [],
     }
@@ -42,7 +43,9 @@ def run_daily_workflow(
             report["steps"].append(result)
             if result["name"] == "run":
                 report["run_step_source"] = result.get("result_source", "cached_or_previous")
+            report["infos"].extend(result.get("infos", []))
             report["warnings"].extend(result.get("warnings", []))
+            report["errors"].extend(result.get("errors", []))
             if result["status"] == "failed":
                 report["errors"].append(f"{result['name']}: {result['message']}")
             elif result["status"] == "warning":
@@ -86,7 +89,9 @@ def _run_step(step):
             "status": "skipped",
             "message": step.get("skip_message", "已跳过。"),
             "duration_seconds": 0,
+            "infos": [step.get("skip_message", "已跳过。")],
             "warnings": [],
+            "errors": [],
         }
 
     started = perf_counter()
@@ -94,12 +99,16 @@ def _run_step(step):
         value = step["func"]() or {}
         status = value.get("status", "success")
         message = value.get("message", "OK")
+        infos = list(value.get("infos", []))
         warnings = list(value.get("warnings", []))
+        errors = list(value.get("errors", []))
         result_source = value.get("result_source")
     except Exception as exc:
         status = "failed"
         message = str(exc)
+        infos = []
         warnings = []
+        errors = [str(exc)]
         result_source = None
         value = {"traceback": traceback.format_exc()}
 
@@ -108,7 +117,9 @@ def _run_step(step):
         "status": status,
         "message": message,
         "duration_seconds": round(perf_counter() - started, 3),
+        "infos": infos,
         "warnings": warnings,
+        "errors": errors,
         **({"result_source": result_source} if result_source else {}),
         **({"traceback": value["traceback"]} if value.get("traceback") else {}),
     }
@@ -145,11 +156,8 @@ def build_network_debug_report(provider_name="NavDataProvider"):
 
 
 def overall_status(report):
-    committee = next((step for step in report["steps"] if step["name"] == "committee-report"), None)
-    if committee and committee["status"] == "failed":
+    if report.get("errors"):
         return "failed"
-    if any(step["status"] == "failed" for step in report["steps"]):
-        return "warning"
     if any(step["status"] == "warning" for step in report["steps"]) or report.get("warnings"):
         return "warning"
     return "success"
@@ -171,6 +179,11 @@ def format_daily_summary(report):
     lines.append(f"* 是否触发补仓：{conclusion.get('drawdown_triggered', 'N/A')}")
     lines.append(f"* 是否需要立即再平衡：{conclusion.get('needs_immediate_rebalance', 'N/A')}")
     lines.append(f"* 未来定投方向：{conclusion.get('future_dca_bias', 'N/A')}")
+    if report.get("infos"):
+        lines.append("")
+        lines.append("Infos:")
+        for info in report["infos"][:10]:
+            lines.append(f"- {info}")
     if report.get("warnings"):
         lines.append("")
         lines.append("Warnings:")

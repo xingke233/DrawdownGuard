@@ -56,8 +56,18 @@ class DailyWorkflowTest(unittest.TestCase):
         steps = [
             {"name": "policy-check", "func": _step(calls, "policy-check")},
             {"name": "run", "func": _step(calls, "run")},
-            {"name": "portfolio-backtest", "func": _step(calls, "portfolio-backtest"), "skip": True},
-            {"name": "contribution-report", "func": _step(calls, "contribution-report"), "skip": True},
+            {
+                "name": "portfolio-backtest",
+                "func": _step(calls, "portfolio-backtest"),
+                "skip": True,
+                "skip_message": "daily quick/skip-backtest 模式已跳过组合回测。",
+            },
+            {
+                "name": "contribution-report",
+                "func": _step(calls, "contribution-report"),
+                "skip": True,
+                "skip_message": "daily quick 模式已跳过资产贡献分析。",
+            },
             {"name": "rebalance-advice", "func": _step(calls, "rebalance-advice")},
             {"name": "committee-report", "func": _step(calls, "committee-report")},
         ]
@@ -68,6 +78,9 @@ class DailyWorkflowTest(unittest.TestCase):
         self.assertNotIn("contribution-report", calls)
         skipped = [step["name"] for step in report["steps"] if step["status"] == "skipped"]
         self.assertEqual(skipped, ["portfolio-backtest", "contribution-report"])
+        self.assertEqual(report["status"], "success")
+        self.assertIn("daily quick/skip-backtest 模式已跳过组合回测。", report["infos"])
+        self.assertIn("daily quick 模式已跳过资产贡献分析。", report["infos"])
 
     def test_failed_step_does_not_crash_workflow(self):
         calls = []
@@ -81,7 +94,7 @@ class DailyWorkflowTest(unittest.TestCase):
         report = run_daily_workflow(steps, save_report=lambda item: None)
 
         self.assertEqual(calls, ["policy-check", "run", "rebalance-advice", "committee-report"])
-        self.assertEqual(report["status"], "warning")
+        self.assertEqual(report["status"], "failed")
         self.assertEqual(report["steps"][1]["status"], "failed")
 
     def test_daily_run_report_is_saved(self):
@@ -127,6 +140,53 @@ class DailyWorkflowTest(unittest.TestCase):
         self.assertEqual(report["status"], "warning")
         self.assertIn("AKShare warning", report["warnings"])
         self.assertIn("run: 真实净值拉取失败", report["warnings"])
+
+    def test_info_only_does_not_make_daily_warning(self):
+        report = run_daily_workflow(
+            [
+                {
+                    "name": "portfolio-backtest",
+                    "func": lambda: {
+                        "status": "success",
+                        "message": "OK",
+                        "infos": ["NASDAQ100: 012752 定投在资产级回测中使用代表基金 270042 净值作为 fallback。"],
+                    },
+                },
+                {"name": "committee-report", "func": lambda: {"status": "success", "message": "OK"}},
+            ],
+            save_report=lambda item: None,
+        )
+
+        self.assertEqual(report["status"], "success")
+        self.assertIn("012752 定投", report["infos"][0])
+
+    def test_error_makes_daily_failed(self):
+        report = run_daily_workflow(
+            [
+                {"name": "policy-check", "func": lambda: {"status": "failed", "message": "配置错误", "errors": ["policy failed"]}},
+                {"name": "committee-report", "func": lambda: {"status": "success", "message": "OK"}},
+            ],
+            save_report=lambda item: None,
+        )
+
+        self.assertEqual(report["status"], "failed")
+        self.assertIn("policy failed", report["errors"])
+
+    def test_012752_fallback_is_info(self):
+        import main
+
+        infos, warnings = main._split_portfolio_messages(
+            [
+                {
+                    "asset_id": "NASDAQ100",
+                    "fund_code": "012752",
+                    "warnings": ["012752 定投在资产级回测中使用代表基金 270042 净值作为 fallback。"],
+                }
+            ]
+        )
+
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(warnings, [])
 
     def test_summary_contains_final_report_and_conclusion(self):
         report = run_daily_workflow(
