@@ -8,14 +8,14 @@ from pathlib import Path
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/drawdownguard_matplotlib")
 
 
-def plot_report_file(report_path, output_dir="backtest_plots", scenario_id=None):
+def plot_report_file(report_path, output_dir="reports/backtest_plots", scenario_id=None):
     path = Path(report_path)
     with path.open("r", encoding="utf-8") as file:
         report = json.load(file)
     return plot_report(report, output_dir=output_dir, scenario_id=scenario_id)
 
 
-def plot_report(report, output_dir="backtest_plots", scenario_id=None):
+def plot_report(report, output_dir="reports/backtest_plots", scenario_id=None):
     scenarios = _normalize_report(report)
     if scenario_id:
         scenarios = [item for item in scenarios if item["scenario_id"] == scenario_id]

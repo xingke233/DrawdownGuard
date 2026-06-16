@@ -1,6 +1,6 @@
 from copy import deepcopy
 
-from backtest import PortfolioBacktester
+from .backtest import PortfolioBacktester
 
 
 WEEKDAYS = [

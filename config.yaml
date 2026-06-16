@@ -94,6 +94,7 @@
         "asset_id": "NASDAQ100",
         "asset_name": "纳斯达克100",
         "representative_fund": "270042",
+        "nav_mode": "unit_nav",
         "strategy": "drawdown_plus_dca",
         "weekly_dca_amount": 50,
         "drawdown_levels": [
@@ -115,6 +116,7 @@
         "asset_id": "HSTECH",
         "asset_name": "恒生科技",
         "representative_fund": "012349",
+        "nav_mode": "unit_nav",
         "strategy": "dca_only",
         "weekly_dca_amount": 20
       },
@@ -122,6 +124,7 @@
         "asset_id": "CASHFLOW",
         "asset_name": "自由现金流",
         "representative_fund": "023918",
+        "nav_mode": "unit_nav",
         "strategy": "dca_only",
         "weekly_dca_amount": 30
       },
@@ -129,6 +132,7 @@
         "asset_id": "DIVIDEND_LOW_VOL",
         "asset_name": "红利低波",
         "representative_fund": "008163",
+        "nav_mode": "accumulated_nav",
         "strategy": "dca_only",
         "weekly_dca_amount": 20
       },
@@ -136,6 +140,7 @@
         "asset_id": "GOLD",
         "asset_name": "黄金",
         "representative_fund": "000216",
+        "nav_mode": "unit_nav",
         "strategy": "dca_only",
         "weekly_dca_amount": 10
       }

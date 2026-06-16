@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from draw_backtest import build_plot_title, plot_report_file
+from drawdownguard.draw_backtest import build_plot_title, plot_report_file
 
 
 class DrawBacktestTest(unittest.TestCase):

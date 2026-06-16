@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backtest import (
+from drawdownguard.backtest import (
     AssetBacktester,
     PortfolioBacktester,
     StrategyBacktester,
@@ -15,9 +15,24 @@ from backtest import (
     summarize_scenarios_report,
     summarize_scenarios_returns,
 )
-from storage import Storage
-from strategy_lab import run_strategy_lab, summarize_strategy_lab_report
-from weekly_dca_analysis import run_weekly_dca_analysis, summarize_weekly_dca_analysis
+from drawdownguard.storage import Storage
+from drawdownguard.strategy_lab import run_strategy_lab, summarize_strategy_lab_report
+from drawdownguard.weekly_dca_analysis import run_weekly_dca_analysis, summarize_weekly_dca_analysis
+from main import collect_portfolio_histories
+
+
+class RecordingPortfolioProvider:
+    def __init__(self):
+        self.calls = []
+
+    def get_full_history(self, fund_code, nav_mode="unit_nav"):
+        self.calls.append((fund_code, nav_mode))
+        nav = 2.0 if nav_mode == "accumulated_nav" else 1.0
+        return {
+            "history": [{"date": "2026-01-05", "nav": nav}],
+            "warnings": [],
+            "nav_mode": nav_mode,
+        }
 
 
 class BacktestTest(unittest.TestCase):
@@ -75,6 +90,62 @@ class BacktestTest(unittest.TestCase):
         self.assertEqual(asset["dca_invested"], 20)
         self.assertAlmostEqual(asset["total_shares"], 10 / 1.0 + 10 / 2.0)
         self.assertAlmostEqual(asset["final_market_value"], 30)
+
+    def test_portfolio_backtest_supports_custom_time_ranges(self):
+        base_config = {
+            **self.config,
+            "portfolio_backtest": {
+                "enabled": True,
+                "start_date": "2018-01-01",
+                "bullet_cash_initial": 2000,
+                "bullet_cash_monthly_addition": 0,
+                "assets": [
+                    {
+                        "asset_id": "CASHFLOW",
+                        "asset_name": "自由现金流",
+                        "representative_fund": "023918",
+                        "strategy": "dca_only",
+                        "weekly_dca_amount": 10,
+                    }
+                ],
+            },
+        }
+        histories = {
+            "023918": [
+                {"date": "2020-01-06", "nav": 1.0},
+                {"date": "2020-01-13", "nav": 1.1},
+                {"date": "2022-01-03", "nav": 1.2},
+                {"date": "2022-01-10", "nav": 1.3},
+                {"date": "2022-01-17", "nav": 1.4},
+            ]
+        }
+
+        cases = [
+            ("2018-01-01", None, "2020-01-06", "2022-01-17", 50),
+            ("2020-01-01", "2020-12-31", "2020-01-06", "2020-01-13", 20),
+            ("2022-01-01", "2022-01-10", "2022-01-03", "2022-01-10", 20),
+        ]
+
+        for start_date, end_date, actual_start, actual_end, dca_invested in cases:
+            with self.subTest(start_date=start_date, end_date=end_date):
+                config = {
+                    **base_config,
+                    "portfolio_backtest": {
+                        **base_config["portfolio_backtest"],
+                        "start_date": start_date,
+                    },
+                }
+                if end_date:
+                    config["portfolio_backtest"]["end_date"] = end_date
+
+                report = PortfolioBacktester(config).run(histories)
+                asset = report["assets"][0]
+
+                self.assertEqual(report["portfolio_summary"]["start_date"], actual_start)
+                self.assertEqual(report["portfolio_summary"]["end_date"], actual_end)
+                self.assertEqual(asset["start_date"], actual_start)
+                self.assertEqual(asset["end_date"], actual_end)
+                self.assertEqual(asset["dca_invested"], dca_invested)
 
     def test_weekly_dca_analysis_outputs_all_weekdays(self):
         config = {
@@ -135,7 +206,14 @@ class BacktestTest(unittest.TestCase):
                             {"level": 15, "cash_ratio": 0.25},
                             {"level": 20, "cash_ratio": 0.35},
                         ],
-                    }
+                    },
+                    {
+                        "asset_id": "HSTECH",
+                        "asset_name": "恒生科技",
+                        "representative_fund": "012349",
+                        "strategy": "dca_only",
+                        "weekly_dca_amount": 10,
+                    },
                 ],
             },
         }
@@ -204,49 +282,65 @@ class BacktestTest(unittest.TestCase):
                 {"date": "2026-01-05", "nav": 1.0},
                 {"date": "2026-01-06", "nav": 0.74},
                 {"date": "2026-01-07", "nav": 1.1},
-            ]
+            ],
+            "012349": [
+                {"date": "2026-01-05", "nav": 1.0},
+                {"date": "2026-01-06", "nav": 0.5},
+                {"date": "2026-01-07", "nav": 1.0},
+            ],
         }
 
         report = run_strategy_lab(config, histories)
 
-        self.assertEqual([item["strategy_name"] for item in report["strategies"]], ["A", "B", "C", "D"])
+        self.assertEqual(
+            [item["strategy_name"] for item in report["strategies"]],
+            ["A_current", "B_conservative", "C_aggressive", "D_balanced"],
+        )
         self.assertEqual([item["level"] for item in report["strategies"][0]["drawdown_levels"]], [10, 15, 20])
         self.assertEqual([item["level"] for item in report["strategies"][1]["drawdown_levels"]], [10, 20, 30])
-        self.assertEqual(report["strategies"][0]["trigger_count"], 3)
-        self.assertEqual(report["strategies"][1]["trigger_count"], 2)
+        self.assertEqual(report["strategies"][0]["trigger_count_total"], 3)
+        self.assertEqual(report["strategies"][1]["trigger_count_total"], 2)
+        self.assertEqual(report["strategies"][0]["bullet_cash_final"], 820)
+        self.assertIn("nasdaq100_return_rate", report["strategies"][0])
         self.assertIn("return_rate", report["rankings"])
-        self.assertEqual(set(report["rankings"]["risk"]), {"A", "B", "C", "D"})
+        self.assertIn("bullet_cash_final", report["rankings"])
+        self.assertIn("trigger_count", report["rankings"])
+        self.assertEqual(report["rankings"]["recommended_strategy"], report["rankings"]["return_rate"][0])
 
     def test_summarize_strategy_lab_report(self):
         report = {
             "strategies": [
                 {
-                    "strategy_name": "A",
+                    "strategy_name": "A_current",
                     "drawdown_levels": [
                         {"level": 10, "cash_ratio": 0.15},
                         {"level": 15, "cash_ratio": 0.25},
                         {"level": 20, "cash_ratio": 0.35},
                     ],
+                    "total_invested": 1000,
                     "total_return_rate": 0.1,
                     "total_profit": 100,
                     "final_market_value": 1100,
-                    "trigger_count": 3,
-                    "bullet_cash_remaining": 820,
-                    "max_drawdown": -0.2,
+                    "trigger_count_total": 3,
+                    "bullet_cash_final": 820,
+                    "nasdaq100_return_rate": 0.2,
                 }
             ],
             "rankings": {
-                "return_rate": ["A"],
-                "cash_efficiency": ["A"],
-                "risk": ["A"],
+                "return_rate": ["A_current"],
+                "bullet_cash_final": ["A_current"],
+                "trigger_count": ["A_current"],
+                "recommended_strategy": "A_current",
             },
         }
 
         summary = summarize_strategy_lab_report(report)
 
         self.assertIn("Strategy Lab 回测摘要", summary)
-        self.assertIn("收益率排名：A", summary)
-        self.assertIn("风险排名：A", summary)
+        self.assertIn("收益率排名：A_current", summary)
+        self.assertIn("子弹仓剩余排名：A_current", summary)
+        self.assertIn("触发次数排名：A_current", summary)
+        self.assertIn("推荐策略：A_current", summary)
 
     def test_portfolio_nasdaq_can_dca_and_drawdown_buy(self):
         config = {
@@ -386,6 +480,59 @@ class BacktestTest(unittest.TestCase):
         self.assertEqual(asset["bullet_invested"], 0)
         self.assertEqual(asset["trigger_count_total"], 0)
         self.assertEqual(report["portfolio_summary"]["skipped_assets"], [])
+
+    def test_collect_portfolio_histories_uses_asset_nav_mode(self):
+        portfolio_config = {
+            "assets": [
+                {
+                    "asset_id": "DIVIDEND_LOW_VOL",
+                    "asset_name": "红利低波",
+                    "representative_fund": "008163",
+                    "nav_mode": "accumulated_nav",
+                },
+                {
+                    "asset_id": "GOLD",
+                    "asset_name": "黄金",
+                    "representative_fund": "000216",
+                    "nav_mode": "unit_nav",
+                },
+            ]
+        }
+        provider = RecordingPortfolioProvider()
+
+        histories, warnings = collect_portfolio_histories(portfolio_config, provider)
+
+        self.assertEqual(provider.calls, [("008163", "accumulated_nav"), ("000216", "unit_nav")])
+        self.assertEqual(histories["008163"][0]["nav"], 2.0)
+        self.assertEqual(histories["000216"][0]["nav"], 1.0)
+        self.assertEqual(warnings, [])
+
+    def test_portfolio_report_includes_nav_mode(self):
+        config = {
+            **self.config,
+            "portfolio_backtest": {
+                "enabled": True,
+                "start_date": "2026-01-05",
+                "bullet_cash_initial": 2000,
+                "bullet_cash_monthly_addition": 0,
+                "assets": [
+                    {
+                        "asset_id": "DIVIDEND_LOW_VOL",
+                        "asset_name": "红利低波",
+                        "representative_fund": "008163",
+                        "nav_mode": "accumulated_nav",
+                        "strategy": "dca_only",
+                        "weekly_dca_amount": 20,
+                    }
+                ],
+            },
+        }
+        report = PortfolioBacktester(config).run({"008163": [{"date": "2026-01-05", "nav": 1.0}]})
+        asset = report["assets"][0]
+        summary = summarize_portfolio_backtest_report(report)
+
+        self.assertEqual(asset["nav_mode"], "accumulated_nav")
+        self.assertIn("净值口径 accumulated_nav", summary)
 
     def test_summarize_portfolio_backtest_report(self):
         report = {
@@ -621,7 +768,7 @@ class BacktestTest(unittest.TestCase):
 
             storage.save_backtest_report(report)
 
-            saved = json.loads((Path(temp_dir) / "backtest_report.json").read_text(encoding="utf-8"))
+            saved = json.loads((Path(temp_dir) / "data" / "backtest_report.json").read_text(encoding="utf-8"))
             self.assertEqual(saved, report)
             self.assertEqual(storage.load_backtest_report(), report)
 
@@ -770,7 +917,7 @@ class BacktestTest(unittest.TestCase):
 
             storage.save_scenarios_report(report)
 
-            saved = json.loads((Path(temp_dir) / "scenarios_report.json").read_text(encoding="utf-8"))
+            saved = json.loads((Path(temp_dir) / "data" / "scenarios_report.json").read_text(encoding="utf-8"))
             self.assertEqual(saved, report)
 
     def test_storage_saves_portfolio_backtest_report(self):
@@ -783,7 +930,7 @@ class BacktestTest(unittest.TestCase):
 
             storage.save_portfolio_backtest_report(report)
 
-            saved = json.loads((Path(temp_dir) / "portfolio_backtest_report.json").read_text(encoding="utf-8"))
+            saved = json.loads((Path(temp_dir) / "data" / "portfolio_backtest_report.json").read_text(encoding="utf-8"))
             self.assertEqual(saved, report)
             self.assertEqual(storage.load_portfolio_backtest_report(), report)
 
@@ -796,7 +943,7 @@ class BacktestTest(unittest.TestCase):
 
             storage.save_weekly_dca_analysis(report)
 
-            saved = json.loads((Path(temp_dir) / "weekly_dca_analysis.json").read_text(encoding="utf-8"))
+            saved = json.loads((Path(temp_dir) / "data" / "weekly_dca_analysis.json").read_text(encoding="utf-8"))
             self.assertEqual(saved, report)
             self.assertEqual(storage.load_weekly_dca_analysis(), report)
 
@@ -810,7 +957,7 @@ class BacktestTest(unittest.TestCase):
 
             storage.save_strategy_lab_report(report)
 
-            saved = json.loads((Path(temp_dir) / "strategy_lab_report.json").read_text(encoding="utf-8"))
+            saved = json.loads((Path(temp_dir) / "data" / "strategy_lab_report.json").read_text(encoding="utf-8"))
             self.assertEqual(saved, report)
             self.assertEqual(storage.load_strategy_lab_report(), report)
 

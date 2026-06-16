@@ -3,16 +3,48 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from data_provider import NavDataProvider
+from drawdownguard.data_provider import NavDataProvider
 from main import build_daily_log_entries, create_skipped_result
-from notifier import format_daily_logs, format_report
-from storage import Storage
-from strategy import DrawdownStrategy
+from drawdownguard.notifier import format_daily_logs, format_report
+from drawdownguard.storage import Storage
+from drawdownguard.strategy import DrawdownStrategy
 
 
 class FailingAkShare:
     def fund_open_fund_info_em(self, symbol, indicator):
         raise RuntimeError(f"akshare unavailable for {symbol}")
+
+
+class NavModeAkShare:
+    def __init__(self, fail_accumulated=False):
+        self.fail_accumulated = fail_accumulated
+        self.calls = []
+
+    def fund_open_fund_info_em(self, symbol, indicator):
+        self.calls.append(indicator)
+        if indicator == "累计净值走势":
+            if self.fail_accumulated:
+                raise RuntimeError("accumulated unavailable")
+            return FakeDataFrame(
+                [
+                    {"净值日期": "2026-01-01", "累计净值": 1.0},
+                    {"净值日期": "2026-01-02", "累计净值": 1.5},
+                ]
+            )
+        return FakeDataFrame(
+            [
+                {"净值日期": "2026-01-01", "单位净值": 1.0},
+                {"净值日期": "2026-01-02", "单位净值": 1.1},
+            ]
+        )
+
+
+class FakeDataFrame:
+    def __init__(self, records):
+        self.records = records
+
+    def to_dict(self, orient):
+        return self.records
 
 
 class NavDataProviderTest(unittest.TestCase):
@@ -91,6 +123,26 @@ class NavDataProviderTest(unittest.TestCase):
             self.assertTrue(any("真实净值获取失败" in warning for warning in result["warnings"]))
             self.assertTrue(any("本地净值文件不存在" in warning for warning in result["warnings"]))
             self.assertTrue(any("净值数据缺失，已跳过" in warning for warning in result["warnings"]))
+
+    def test_accumulated_nav_mode_uses_accumulated_indicator(self):
+        akshare = NavModeAkShare()
+        provider = NavDataProvider(Path("/tmp/missing_nav_data.json"), self.config, akshare_client=akshare)
+
+        result = provider.get_full_history("demo", nav_mode="accumulated_nav")
+
+        self.assertEqual(result["nav_mode"], "accumulated_nav")
+        self.assertEqual(result["history"][-1]["nav"], 1.5)
+        self.assertIn("累计净值走势", akshare.calls)
+
+    def test_accumulated_nav_failure_falls_back_to_unit_nav(self):
+        akshare = NavModeAkShare(fail_accumulated=True)
+        provider = NavDataProvider(Path("/tmp/missing_nav_data.json"), self.config, akshare_client=akshare)
+
+        result = provider.get_full_history("demo", nav_mode="accumulated_nav")
+
+        self.assertEqual(result["nav_mode"], "unit_nav")
+        self.assertEqual(result["history"][-1]["nav"], 1.1)
+        self.assertTrue(any("累计净值获取失败" in warning for warning in result["warnings"]))
 
     def test_skipped_fund_is_rendered_and_other_fund_can_continue(self):
         strategy = DrawdownStrategy(self.config)

@@ -4,6 +4,7 @@ import json
 class Storage:
     def __init__(self, base_dir):
         self.base_dir = base_dir
+        self.data_dir = self.base_dir / "data"
 
     def load_config(self, filename="config.yaml"):
         path = self.base_dir / filename
@@ -76,17 +77,77 @@ class Storage:
     def load_portfolio_backtest_report(self):
         return self._load_json("portfolio_backtest_report.json", {})
 
+    def save_contribution_report(self, report):
+        self._save_json("contribution_report.json", report)
+
+    def load_contribution_report(self):
+        return self._load_json("contribution_report.json", {})
+
+    def save_fund_check_report(self, report):
+        self._save_json("fund_check_report.json", report)
+
+    def load_fund_check_report(self):
+        return self._load_json("fund_check_report.json", {})
+
+    def save_asset_dca_audit_report(self, asset_id, report):
+        self._save_json(f"asset_dca_audit_{asset_id}.json", report)
+
+    def load_asset_dca_audit_report(self, asset_id):
+        return self._load_json(f"asset_dca_audit_{asset_id}.json", {})
+
     def save_weekly_dca_analysis(self, report):
         self._save_json("weekly_dca_analysis.json", report)
 
     def load_weekly_dca_analysis(self):
         return self._load_json("weekly_dca_analysis.json", {})
 
+    def save_dca_strategy_report(self, report):
+        self._save_json("dca_strategy_report.json", report)
+
+    def load_dca_strategy_report(self):
+        return self._load_json("dca_strategy_report.json", {})
+
+    def save_portfolio_strategy_report(self, report):
+        self._save_json("portfolio_strategy_report.json", report)
+
+    def load_portfolio_strategy_report(self):
+        return self._load_json("portfolio_strategy_report.json", {})
+
+    def save_portfolio_optimize_report(self, report):
+        self._save_json("portfolio_optimize_report.json", report)
+
+    def load_portfolio_optimize_report(self):
+        return self._load_json("portfolio_optimize_report.json", {})
+
+    def save_portfolio_optimize_continuous_report(self, report):
+        self._save_json("portfolio_optimize_continuous_report.json", report)
+
+    def load_portfolio_optimize_continuous_report(self):
+        return self._load_json("portfolio_optimize_continuous_report.json", {})
+
     def save_strategy_lab_report(self, report):
         self._save_json("strategy_lab_report.json", report)
 
     def load_strategy_lab_report(self):
         return self._load_json("strategy_lab_report.json", {})
+
+    def save_take_profit_report(self, report):
+        self._save_json("take_profit_report.json", report)
+
+    def load_take_profit_report(self):
+        return self._load_json("take_profit_report.json", {})
+
+    def save_risk_compare_report(self, report):
+        self._save_json("risk_compare_report.json", report)
+
+    def load_risk_compare_report(self):
+        return self._load_json("risk_compare_report.json", {})
+
+    def save_take_profit_optimizer_report(self, report):
+        self._save_json("take_profit_optimizer_report.json", report)
+
+    def load_take_profit_optimizer_report(self):
+        return self._load_json("take_profit_optimizer_report.json", {})
 
     def save_scenarios_report(self, report):
         self._save_json("scenarios_report.json", report)
@@ -105,14 +166,18 @@ class Storage:
         )
 
     def _load_json(self, filename, default):
-        path = self.base_dir / filename
+        path = self.data_dir / filename
+        legacy_path = self.base_dir / filename
+        if not path.exists() and legacy_path.exists():
+            path = legacy_path
         if not path.exists():
             return default
         with path.open("r", encoding="utf-8") as file:
             return json.load(file)
 
     def _save_json(self, filename, data):
-        path = self.base_dir / filename
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        path = self.data_dir / filename
         with path.open("w", encoding="utf-8") as file:
             json.dump(data, file, ensure_ascii=False, indent=2)
             file.write("\n")

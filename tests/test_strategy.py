@@ -1,7 +1,7 @@
 import unittest
 
-from notifier import format_report
-from strategy import DrawdownStrategy
+from drawdownguard.notifier import format_report
+from drawdownguard.strategy import DrawdownStrategy
 
 
 class DrawdownStrategyTest(unittest.TestCase):

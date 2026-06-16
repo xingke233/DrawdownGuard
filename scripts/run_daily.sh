@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-LOG_DIR="${PROJECT_DIR}/logs"
+LOG_DIR="${PROJECT_DIR}/reports/logs"
 LOG_FILE="${LOG_DIR}/run_$(date +%F).txt"
 
 cd "${PROJECT_DIR}"

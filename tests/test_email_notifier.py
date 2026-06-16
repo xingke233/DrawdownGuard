@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from email_notifier import build_email_body, send_daily_email
+from drawdownguard.email_notifier import build_email_body, send_daily_email
 
 
 class EmailNotifierTest(unittest.TestCase):
@@ -46,7 +46,7 @@ class EmailNotifierTest(unittest.TestCase):
             }
         ]
 
-    @patch("email_notifier.smtplib.SMTP")
+    @patch("drawdownguard.email_notifier.smtplib.SMTP")
     def test_disabled_email_does_not_send(self, smtp):
         config = {**self.config, "email": {**self.config["email"], "enabled": False}}
 
@@ -55,7 +55,7 @@ class EmailNotifierTest(unittest.TestCase):
         self.assertFalse(result["sent"])
         smtp.assert_not_called()
 
-    @patch("email_notifier.smtplib.SMTP")
+    @patch("drawdownguard.email_notifier.smtplib.SMTP")
     def test_empty_receivers_does_not_send(self, smtp):
         config = {**self.config, "email": {**self.config["email"], "receivers": []}}
 
@@ -65,7 +65,7 @@ class EmailNotifierTest(unittest.TestCase):
         self.assertEqual(result["reason"], "no receivers configured")
         smtp.assert_not_called()
 
-    @patch("email_notifier.smtplib.SMTP")
+    @patch("drawdownguard.email_notifier.smtplib.SMTP")
     def test_send_only_when_action_required_skips_without_suggestions(self, smtp):
         result = send_daily_email(self.config, self.no_action_results)
 
@@ -73,7 +73,7 @@ class EmailNotifierTest(unittest.TestCase):
         self.assertEqual(result["reason"], "no action required")
         smtp.assert_not_called()
 
-    @patch("email_notifier.smtplib.SMTP")
+    @patch("drawdownguard.email_notifier.smtplib.SMTP")
     def test_sends_when_action_required_exists(self, smtp):
         smtp_instance = smtp.return_value.__enter__.return_value
 
@@ -88,7 +88,7 @@ class EmailNotifierTest(unittest.TestCase):
         self.assertEqual(message["Subject"], "DrawdownGuard 每日检查 2026-06-09")
         self.assertIn("建议补仓金额：10% 档 300 元", message.get_content())
 
-    @patch("email_notifier.smtplib.SMTP")
+    @patch("drawdownguard.email_notifier.smtplib.SMTP")
     def test_smtp_exception_does_not_raise(self, smtp):
         smtp.side_effect = RuntimeError("smtp down")
 

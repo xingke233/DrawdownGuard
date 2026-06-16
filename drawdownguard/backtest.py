@@ -214,6 +214,7 @@ class PortfolioBacktester:
         self.window = int(config.get("peak_window_trading_days", 250))
         self.round_to = int(config.get("round_amount_to", 10))
         self.start_date = self.portfolio_config.get("start_date", "1900-01-01")
+        self.end_date = self.portfolio_config.get("end_date")
         self.bullet_cash_initial = int(self.portfolio_config.get("bullet_cash_initial", 0))
         self.bullet_cash_monthly_addition = int(
             self.portfolio_config.get("bullet_cash_monthly_addition", 0)
@@ -231,6 +232,7 @@ class PortfolioBacktester:
                 "asset_id": state["asset_id"],
                 "asset_name": state["asset_name"],
                 "representative_fund": state["representative_fund"],
+                "nav_mode": state["nav_mode"],
                 "skip_reason": state["skip_reason"],
             }
             for state in asset_states
@@ -264,7 +266,9 @@ class PortfolioBacktester:
         return {
             "portfolio_backtest": self.portfolio_config,
             "portfolio_summary": {
-                "start_date": self.start_date,
+                "requested_start_date": self.start_date,
+                "requested_end_date": self.end_date,
+                "start_date": all_dates[0] if all_dates else None,
                 "end_date": all_dates[-1] if all_dates else None,
                 "total_dca_invested": total_dca_invested,
                 "total_bullet_invested": total_bullet_invested,
@@ -289,6 +293,7 @@ class PortfolioBacktester:
             "asset_id": asset["asset_id"],
             "asset_name": asset["asset_name"],
             "representative_fund": representative_fund,
+            "nav_mode": asset.get("nav_mode", "unit_nav"),
             "strategy": asset.get("strategy", "dca_only"),
             "weekly_dca_amount": int(asset.get("weekly_dca_amount", 0)),
             "status": "active",
@@ -310,7 +315,7 @@ class PortfolioBacktester:
 
         history = [
             item for item in representative_histories.get(representative_fund, [])
-            if item["date"] >= self.start_date
+            if item["date"] >= self.start_date and (not self.end_date or item["date"] <= self.end_date)
         ]
         if not history:
             return {**base_state, "status": "skipped", "skip_reason": "代表基金净值数据缺失。"}
@@ -330,13 +335,14 @@ class PortfolioBacktester:
 
         base_state["history"] = sorted(history, key=lambda item: item["date"])
         base_state["nav_by_date"] = {item["date"]: item["nav"] for item in base_state["history"]}
+        base_state["next_dca_date"] = self._initial_dca_date(base_state["history"][0]["date"])
         base_state["levels"] = levels
         base_state["triggered_levels"] = {level: False for level, _ in levels}
         base_state["trigger_count_by_level"] = {level: 0 for level, _ in levels}
         return base_state
 
     def _process_asset_day(self, state, current_date, nav, bullet_cash):
-        while date.fromisoformat(current_date) >= state["next_dca_date"]:
+        if date.fromisoformat(current_date) >= state["next_dca_date"]:
             amount = state["weekly_dca_amount"]
             if amount > 0:
                 shares = amount / nav if nav else 0
@@ -355,6 +361,8 @@ class PortfolioBacktester:
                     }
                 )
             state["next_dca_date"] += timedelta(days=7)
+            while date.fromisoformat(current_date) >= state["next_dca_date"]:
+                state["next_dca_date"] += timedelta(days=7)
 
         peak_nav, previous_peak = self._rolling_peaks(state, current_date, nav)
         if nav > previous_peak:
@@ -419,6 +427,7 @@ class PortfolioBacktester:
                 "asset_id": state["asset_id"],
                 "asset_name": state["asset_name"],
                 "representative_fund": state["representative_fund"],
+                "nav_mode": state["nav_mode"],
                 "strategy": state["strategy"],
                 "status": "skipped",
                 "skip_reason": state["skip_reason"],
@@ -443,9 +452,12 @@ class PortfolioBacktester:
             "asset_id": state["asset_id"],
             "asset_name": state["asset_name"],
             "representative_fund": state["representative_fund"],
+            "nav_mode": state["nav_mode"],
             "strategy": state["strategy"],
             "status": "active",
             "skip_reason": None,
+            "start_date": state["history"][0]["date"],
+            "end_date": state["history"][-1]["date"],
             "dca_invested": state["dca_invested"],
             "bullet_invested": state["bullet_invested"],
             "total_invested": total_invested,
@@ -462,6 +474,13 @@ class PortfolioBacktester:
 
     def _round_up(self, amount):
         return int(ceil(amount / self.round_to) * self.round_to)
+
+    def _initial_dca_date(self, first_history_date):
+        requested_start = date.fromisoformat(self.start_date)
+        first_available = date.fromisoformat(first_history_date)
+        if (first_available - requested_start).days > 7:
+            return first_available
+        return _next_weekday(requested_start, self.dca_weekday)
 
 
 def summarize_backtest_report(report):
@@ -522,6 +541,7 @@ def summarize_portfolio_backtest_report(report):
         for asset in active_assets:
             lines.append(
                 f"- {asset['asset_id']} | {asset['asset_name']} | "
+                f"净值口径 {asset.get('nav_mode', 'unit_nav')} | "
                 f"投入 {asset['total_invested']:.2f} 元 | "
                 f"定投 {asset['dca_invested']:.2f} 元 | "
                 f"补仓 {asset['bullet_invested']:.2f} 元 | "
