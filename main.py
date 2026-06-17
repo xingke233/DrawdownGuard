@@ -1,4 +1,5 @@
 import argparse
+import json
 from contextlib import redirect_stdout
 from datetime import date
 from io import StringIO
@@ -20,6 +21,7 @@ from drawdownguard.backtest import (
 )
 from drawdownguard.asset_dca_audit import run_asset_dca_audit, summarize_asset_dca_audit
 from drawdownguard.committee_report import build_committee_report
+from drawdownguard.config_manager import ConfigManager
 from drawdownguard.daily_workflow import (
     build_network_debug_report,
     format_daily_summary,
@@ -36,6 +38,7 @@ from drawdownguard.dca_strategy_lab import (
 from drawdownguard.draw_backtest import plot_report_file
 from drawdownguard.email_notifier import send_daily_email
 from drawdownguard.fund_check import run_fund_check, summarize_fund_check_report
+from drawdownguard.interactive_control import run_interactive_control
 from drawdownguard.nav_cache import NavCache
 from drawdownguard.notifier import format_daily_logs, format_report, format_transactions
 from drawdownguard.portfolio_constraint_optimizer import (
@@ -51,6 +54,7 @@ from drawdownguard.portfolio_strategy import (
     run_portfolio_strategy_synth,
     summarize_portfolio_strategy_report,
 )
+from drawdownguard.quant_signal import run_quant_signal, summarize_quant_signal_report
 from drawdownguard.real_config import (
     run_policy_checks,
     summarize_holdings_report,
@@ -70,6 +74,15 @@ from drawdownguard.take_profit_optimizer import (
     summarize_take_profit_optimizer_report,
 )
 from drawdownguard.weekly_dca_analysis import run_weekly_dca_analysis, summarize_weekly_dca_analysis
+from drawdownguard.watchlist import (
+    add_watchlist_fund,
+    analyze_all_watchlist,
+    analyze_watchlist_fund,
+    promote_watchlist_fund,
+    remove_watchlist_fund,
+    summarize_watchlist,
+    summarize_watchlist_analysis,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -318,6 +331,10 @@ def run_committee_report_command(args):
         portfolio_backtest_report=storage.load_portfolio_backtest_report(),
         contribution_report=storage.load_contribution_report(),
         rebalance_advice=storage.load_rebalance_advice(),
+        daily_run_report=storage.load_daily_run_report(),
+        quant_signal_report=storage.load_quant_signal_report(),
+        watchlist_report=storage.load_watchlist_analysis_report(),
+        plain=args.plain,
     )
     storage.save_committee_report(report)
     print("投委会报告已写入 data/committee_report.md 和 data/committee_report.json")
@@ -344,6 +361,161 @@ def clear_cache_command(args):
     cache.clear()
     print("已清空 data/nav_cache.json")
     return 0
+
+
+def _policy_check_after_change(config_filename="config.yaml"):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(config_filename)
+    report = run_policy_checks(config)
+    print(summarize_policy_check(report))
+    return report
+
+
+def _finish_config_change(result, config_filename="config.yaml"):
+    manager = ConfigManager(BASE_DIR)
+    if result.get("dry_run"):
+        print("DRY RUN：不会写入任何配置。")
+        print(json.dumps({key: result.get(key) for key in ("operation", "target", "before", "after")}, ensure_ascii=False, indent=2))
+        return 0
+    policy_report = _policy_check_after_change(config_filename)
+    manager.log_change(
+        result["operation"],
+        result["target"],
+        result.get("before"),
+        result.get("after"),
+        result.get("backup_path"),
+        {"passed": policy_report.get("passed"), "issues": policy_report.get("issues", [])},
+    )
+    print(f"配置已更新，备份目录：{result.get('backup_path')}")
+    if not policy_report.get("passed"):
+        print("policy-check 未通过。可执行 python3 main.py config-rollback --latest 回滚。")
+        return 1
+    print("下一步建议：python3 main.py daily --quick")
+    return 0
+
+
+def cash_update_command(args):
+    result = ConfigManager(BASE_DIR).update_cash(args.amount, dry_run=args.dry_run)
+    return _finish_config_change(result, args.config)
+
+
+def holding_update_command(args):
+    result = ConfigManager(BASE_DIR).update_holding(args.fund_code, args.amount, dry_run=args.dry_run)
+    return _finish_config_change(result, args.config)
+
+
+def holding_add_command(args):
+    result = ConfigManager(BASE_DIR).add_holding(
+        args.fund_code,
+        args.name,
+        args.asset_id,
+        args.role,
+        args.amount,
+        nav_mode=args.nav_mode,
+        dry_run=args.dry_run,
+    )
+    return _finish_config_change(result, args.config)
+
+
+def holding_remove_command(args):
+    result = ConfigManager(BASE_DIR).remove_holding(args.fund_code, dry_run=args.dry_run)
+    return _finish_config_change(result, args.config)
+
+
+def dca_add_command(args):
+    result = ConfigManager(BASE_DIR).add_dca(
+        args.fund_code,
+        args.amount,
+        args.frequency,
+        weekday=args.weekday,
+        dry_run=args.dry_run,
+    )
+    return _finish_config_change(result, args.config)
+
+
+def dca_update_command(args):
+    result = ConfigManager(BASE_DIR).update_dca(args.fund_code, args.amount, dry_run=args.dry_run)
+    return _finish_config_change(result, args.config)
+
+
+def dca_pause_command(args):
+    result = ConfigManager(BASE_DIR).set_dca_status(args.fund_code, "paused", dry_run=args.dry_run)
+    return _finish_config_change(result, args.config)
+
+
+def dca_resume_command(args):
+    result = ConfigManager(BASE_DIR).set_dca_status(args.fund_code, "active", dry_run=args.dry_run)
+    return _finish_config_change(result, args.config)
+
+
+def config_backup_command(args):
+    path = ConfigManager(BASE_DIR).backup()
+    print(f"配置备份已创建：{path}")
+    return 0
+
+
+def config_backup_list_command(args):
+    backups = ConfigManager(BASE_DIR).list_backups()
+    if not backups:
+        print("暂无配置备份。")
+        return 0
+    for path in backups[-20:]:
+        print(path)
+    return 0
+
+
+def config_rollback_command(args):
+    if not args.latest:
+        print("当前仅支持 --latest 回滚。")
+        return 1
+    manager = ConfigManager(BASE_DIR)
+    try:
+        path = manager.rollback_latest()
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    policy_report = _policy_check_after_change(args.config)
+    manager.log_change(
+        "config-rollback",
+        "latest",
+        None,
+        {"backup_path": str(path)},
+        str(path),
+        {"passed": policy_report.get("passed"), "issues": policy_report.get("issues", [])},
+    )
+    print(f"已回滚到：{path}")
+    return 0 if policy_report.get("passed") else 1
+
+
+def config_change_log_command(args):
+    logs = ConfigManager(BASE_DIR).recent_logs(limit=20)
+    if not logs:
+        print("暂无配置修改记录。")
+        return 0
+    for item in logs:
+        print(f"{item.get('timestamp')} | {item.get('operation')} | {item.get('target')} | passed={item.get('policy_check_result', {}).get('passed')}")
+    return 0
+
+
+def interactive_command(args):
+    actions = {
+        "profile": show_profile_report,
+        "holdings": show_holdings_report,
+        "committee": run_committee_report_command,
+        "daily": run_daily_command,
+        "cash_update": cash_update_command,
+        "holding_update": holding_update_command,
+        "watchlist_add": watchlist_add_command,
+        "watchlist_remove": watchlist_remove_command,
+        "dca_add": dca_add_command,
+        "dca_update": dca_update_command,
+        "dca_pause": dca_pause_command,
+        "dca_resume": dca_resume_command,
+        "policy": run_policy_check_command,
+        "backup": config_backup_command,
+        "rollback": config_rollback_command,
+    }
+    return run_interactive_control(actions, args)
 
 
 def _format_cache_status(report):
@@ -399,6 +571,18 @@ def _daily_steps(args):
             "func": _daily_contribution_report,
             "skip": args.quick,
             "skip_message": "daily quick 模式已跳过资产贡献分析。",
+        },
+        {
+            "name": "quant-signal",
+            "func": lambda: _daily_quant_signal(args),
+            "skip": args.skip_quant,
+            "skip_message": "daily --skip-quant 已跳过量化信号刷新，committee-report 将使用已有 quant_signal_report.json。",
+        },
+        {
+            "name": "watchlist-analyze",
+            "func": lambda: _daily_watchlist_analyze(args),
+            "skip": not args.include_watchlist,
+            "skip_message": "daily 默认不分析观察池；如需刷新请使用 --include-watchlist。",
         },
         {"name": "rebalance-advice", "func": lambda: _daily_rebalance_advice(args)},
         {"name": "committee-report", "func": lambda: _daily_committee_report(args)},
@@ -484,6 +668,47 @@ def _daily_contribution_report():
     return {"status": "success", "message": "资产贡献分析完成。"}
 
 
+def _daily_quant_signal(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    provider = NavDataProvider(BASE_DIR / args.nav_file, config)
+    report = run_quant_signal(config, provider)
+    storage.save_quant_signal_report(report)
+    available = [asset for asset in report.get("assets", []) if asset.get("status") == "available"]
+    if not available:
+        return {
+            "status": "warning",
+            "message": "量化信号无法生成。",
+            "warnings": ["全部量化资产净值数据缺失，已保留空报告。"],
+        }
+    infos, warnings = _split_quant_messages(report.get("warnings", []))
+    if warnings:
+        return {
+            "status": "warning",
+            "message": "量化信号完成，但存在数据 warning。",
+            "infos": infos,
+            "warnings": warnings,
+        }
+    return {"status": "success", "message": "量化信号完成。", "infos": infos}
+
+
+def _daily_watchlist_analyze(args):
+    storage = Storage(BASE_DIR)
+    watchlist = storage.load_watchlist_funds()
+    if not watchlist.get("funds"):
+        report = {"generated_at": date.today().isoformat(), "funds": [], "warnings": []}
+        storage.save_watchlist_analysis_report(report)
+        return {"status": "success", "message": "观察池为空。", "infos": ["观察池为空，已跳过分析。"]}
+    config = storage.load_config(args.config)
+    provider = NavDataProvider(BASE_DIR / args.nav_file, config)
+    report = analyze_all_watchlist(config, provider, watchlist)
+    storage.save_watchlist_analysis_report(report)
+    infos, warnings = _split_quant_messages(report.get("warnings", []))
+    if warnings:
+        return {"status": "warning", "message": "观察池分析完成，但存在数据 warning。", "infos": infos, "warnings": warnings}
+    return {"status": "success", "message": "观察池分析完成。", "infos": infos}
+
+
 def _daily_rebalance_advice(args):
     _build_and_save_rebalance_advice(args.config)
     return {"status": "success", "message": "再平衡建议完成。"}
@@ -499,6 +724,9 @@ def _daily_committee_report(args):
         portfolio_backtest_report=storage.load_portfolio_backtest_report(),
         contribution_report=storage.load_contribution_report(),
         rebalance_advice=storage.load_rebalance_advice(),
+        daily_run_report=storage.load_daily_run_report(),
+        quant_signal_report=storage.load_quant_signal_report(),
+        watchlist_report=storage.load_watchlist_analysis_report(),
     )
     storage.save_committee_report(report)
     if not (BASE_DIR / "data" / "committee_report.md").exists():
@@ -585,6 +813,23 @@ def _split_portfolio_messages(items):
     return infos, warnings
 
 
+def _split_quant_messages(items):
+    infos = []
+    warnings = []
+    for item in items:
+        text = str(item)
+        if (
+            "已切换到缓存数据" in text
+            or "真实净值获取失败" in text
+            or "累计净值获取失败" in text
+            or "单位净值获取失败" in text
+        ) and "数据不足" not in text:
+            infos.append(text)
+        else:
+            warnings.append(text)
+    return infos, warnings
+
+
 def _is_info_message(message):
     return "012752 定投在资产级回测中使用代表基金 270042 净值作为 fallback" in message
 
@@ -593,12 +838,17 @@ def _build_daily_conclusion():
     storage = Storage(BASE_DIR)
     logs = _latest_daily_logs(storage.load_daily_logs())
     rebalance = storage.load_rebalance_advice()
+    quant = storage.load_quant_signal_report()
     triggered = any(bool(item.get("suggestions")) for item in logs)
     conclusion = rebalance.get("conclusion", {})
+    quant_summary = quant.get("portfolio_quant_summary", {})
     return {
         "drawdown_triggered": triggered,
         "needs_immediate_rebalance": conclusion.get("needs_immediate_rebalance"),
         "future_dca_bias": conclusion.get("future_dca_bias"),
+        "quant_market_regime": quant_summary.get("market_regime"),
+        "average_quant_score": quant_summary.get("average_quant_score"),
+        "core_asset_score": quant_summary.get("core_asset_score"),
     }
 
 
@@ -765,6 +1015,142 @@ def run_asset_dca_audit_command(args):
     storage.save_asset_dca_audit_report(report["asset_id"], report)
     print(f"资产定投审计完成，报告已写入 data/asset_dca_audit_{report['asset_id']}.json")
     print(summarize_asset_dca_audit(report))
+    return 0
+
+
+def run_quant_signal_command(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    provider = NavDataProvider(BASE_DIR / args.nav_file, config)
+    report = run_quant_signal(config, provider)
+    storage.save_quant_signal_report(report)
+    print("量化信号报告已写入 data/quant_signal_report.json")
+    print(summarize_quant_signal_report(report))
+    return 0
+
+
+def show_quant_signal_detail(args):
+    storage = Storage(BASE_DIR)
+    report = storage.load_quant_signal_report()
+    if not report:
+        print("暂无量化信号报告，请先运行 python3 main.py quant-signal。")
+        return 0
+    print(summarize_quant_signal_report(report, detail=True))
+    return 0
+
+
+def watchlist_add_command(args):
+    storage = Storage(BASE_DIR)
+    before = storage.load_watchlist_funds()
+    try:
+        updated, item = add_watchlist_fund(
+            before,
+            args.fund_code,
+            args.name,
+            role=args.role,
+            reason=args.reason or "",
+            nav_mode=args.nav_mode,
+        )
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    if args.dry_run:
+        print("DRY RUN：不会写入任何配置。")
+        print(json.dumps(item, ensure_ascii=False, indent=2))
+        return 0
+    manager = ConfigManager(BASE_DIR)
+    backup_path = manager.backup()
+    storage.save_watchlist_funds(updated)
+    policy_report = _policy_check_after_change(args.config)
+    manager.log_change(
+        "watchlist-add",
+        args.fund_code,
+        before,
+        updated,
+        str(backup_path),
+        {"passed": policy_report.get("passed"), "issues": policy_report.get("issues", [])},
+    )
+    print("观察基金已添加到 data/watchlist_funds.json")
+    print(f"配置已备份：{backup_path}")
+    print(f"{item['fund_code']} {item['fund_name']} | role {item['candidate_role']} | allow_dca {item['allow_dca']} | allow_drawdown_buy {item['allow_drawdown_buy']}")
+    return 0 if policy_report.get("passed") else 1
+
+
+def watchlist_report_command(args):
+    storage = Storage(BASE_DIR)
+    print(summarize_watchlist(storage.load_watchlist_funds()))
+    return 0
+
+
+def watchlist_analyze_command(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    watchlist = storage.load_watchlist_funds()
+    provider = NavDataProvider(BASE_DIR / args.nav_file, config)
+    try:
+        report = analyze_watchlist_fund(
+            config,
+            provider,
+            watchlist,
+            args.fund_code,
+            weekly_dca=args.weekly_dca,
+            start_date=args.start_date,
+        )
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    storage.save_watchlist_fund_analysis(args.fund_code, report)
+    aggregate = storage.load_watchlist_analysis_report()
+    funds = [item for item in aggregate.get("funds", []) if item.get("fund", {}).get("fund_code") != args.fund_code]
+    funds.append(report)
+    storage.save_watchlist_analysis_report({"generated_at": date.today().isoformat(), "funds": funds, "warnings": aggregate.get("warnings", [])})
+    print(f"观察基金分析已写入 data/watchlist_analysis_{args.fund_code}.json")
+    print(summarize_watchlist_analysis(report))
+    return 0
+
+
+def watchlist_remove_command(args):
+    storage = Storage(BASE_DIR)
+    before = storage.load_watchlist_funds()
+    try:
+        updated = remove_watchlist_fund(before, args.fund_code)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    if args.dry_run:
+        print("DRY RUN：不会写入任何配置。")
+        print(json.dumps({"before": before, "after": updated}, ensure_ascii=False, indent=2))
+        return 0
+    manager = ConfigManager(BASE_DIR)
+    backup_path = manager.backup()
+    storage.save_watchlist_funds(updated)
+    policy_report = _policy_check_after_change(args.config)
+    manager.log_change(
+        "watchlist-remove",
+        args.fund_code,
+        before,
+        updated,
+        str(backup_path),
+        {"passed": policy_report.get("passed"), "issues": policy_report.get("issues", [])},
+    )
+    print(f"已从观察池移除：{args.fund_code}")
+    print(f"配置已备份：{backup_path}")
+    return 0 if policy_report.get("passed") else 1
+
+
+def watchlist_promote_command(args):
+    storage = Storage(BASE_DIR)
+    try:
+        report = promote_watchlist_fund(storage.load_watchlist_funds(), args.fund_code)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    print("观察基金转入真实持仓建议")
+    print(report["message"])
+    print("holding snippet:")
+    print(json.dumps(report["holding_snippet"], ensure_ascii=False, indent=2))
+    print("policy reminder:")
+    print(json.dumps(report["policy_reminder"], ensure_ascii=False, indent=2))
     return 0
 
 
@@ -1363,6 +1749,7 @@ def parse_args():
     rebalance_detail_parser.set_defaults(func=show_rebalance_detail)
 
     committee_report_parser = subparsers.add_parser("committee-report", help="生成个人投委会报告")
+    committee_report_parser.add_argument("--plain", action="store_true", help="输出旧版简洁文本，不使用表格摘要和 emoji")
     committee_report_parser.set_defaults(func=run_committee_report_command)
 
     cache_status_parser = subparsers.add_parser("cache-status", help="查看本地净值缓存状态")
@@ -1372,10 +1759,78 @@ def parse_args():
     cache_clear_parser.add_argument("--yes", action="store_true", help="确认清空 data/nav_cache.json")
     cache_clear_parser.set_defaults(func=clear_cache_command)
 
+    interactive_parser = subparsers.add_parser("interactive", help="启动 DrawdownGuard 交互式控制中心")
+    interactive_parser.set_defaults(func=interactive_command)
+
+    cash_update_parser = subparsers.add_parser("cash-update", help="更新子弹仓金额")
+    cash_update_parser.add_argument("--amount", type=float, required=True, help="新的子弹仓金额")
+    cash_update_parser.add_argument("--dry-run", action="store_true", help="只预览修改，不写入文件")
+    cash_update_parser.set_defaults(func=cash_update_command)
+
+    holding_update_parser = subparsers.add_parser("holding-update", help="更新基金持仓金额")
+    holding_update_parser.add_argument("fund_code", help="基金代码")
+    holding_update_parser.add_argument("--amount", type=float, required=True, help="新的持仓金额")
+    holding_update_parser.add_argument("--dry-run", action="store_true", help="只预览修改，不写入文件")
+    holding_update_parser.set_defaults(func=holding_update_command)
+
+    holding_add_parser = subparsers.add_parser("holding-add", help="新增真实持仓基金")
+    holding_add_parser.add_argument("fund_code", help="基金代码")
+    holding_add_parser.add_argument("--name", required=True, help="基金名称")
+    holding_add_parser.add_argument("--asset-id", required=True, help="资产ID")
+    holding_add_parser.add_argument("--role", required=True, help="资产角色")
+    holding_add_parser.add_argument("--amount", type=float, required=True, help="持仓金额")
+    holding_add_parser.add_argument("--nav-mode", default="unit_nav", choices=["unit_nav", "accumulated_nav"], help="净值口径")
+    holding_add_parser.add_argument("--dry-run", action="store_true", help="只预览修改，不写入文件")
+    holding_add_parser.set_defaults(func=holding_add_command)
+
+    holding_remove_parser = subparsers.add_parser("holding-remove", help="删除真实持仓基金")
+    holding_remove_parser.add_argument("fund_code", help="基金代码")
+    holding_remove_parser.add_argument("--dry-run", action="store_true", help="只预览修改，不写入文件")
+    holding_remove_parser.set_defaults(func=holding_remove_command)
+
+    dca_add_parser = subparsers.add_parser("dca-add", help="新增定投计划")
+    dca_add_parser.add_argument("fund_code", help="基金代码")
+    dca_add_parser.add_argument("--amount", type=float, required=True, help="定投金额")
+    dca_add_parser.add_argument("--frequency", choices=["weekly", "monthly"], required=True, help="定投频率")
+    dca_add_parser.add_argument("--weekday", choices=["mon", "tue", "wed", "thu", "fri"], help="每周定投日")
+    dca_add_parser.add_argument("--dry-run", action="store_true", help="只预览修改，不写入文件")
+    dca_add_parser.set_defaults(func=dca_add_command)
+
+    dca_update_parser = subparsers.add_parser("dca-update", help="修改定投金额")
+    dca_update_parser.add_argument("fund_code", help="基金代码")
+    dca_update_parser.add_argument("--amount", type=float, required=True, help="新的定投金额")
+    dca_update_parser.add_argument("--dry-run", action="store_true", help="只预览修改，不写入文件")
+    dca_update_parser.set_defaults(func=dca_update_command)
+
+    dca_pause_parser = subparsers.add_parser("dca-pause", help="暂停定投计划")
+    dca_pause_parser.add_argument("fund_code", help="基金代码")
+    dca_pause_parser.add_argument("--dry-run", action="store_true", help="只预览修改，不写入文件")
+    dca_pause_parser.set_defaults(func=dca_pause_command)
+
+    dca_resume_parser = subparsers.add_parser("dca-resume", help="恢复定投计划")
+    dca_resume_parser.add_argument("fund_code", help="基金代码")
+    dca_resume_parser.add_argument("--dry-run", action="store_true", help="只预览修改，不写入文件")
+    dca_resume_parser.set_defaults(func=dca_resume_command)
+
+    config_backup_parser = subparsers.add_parser("config-backup", help="备份当前真实配置")
+    config_backup_parser.set_defaults(func=config_backup_command)
+
+    config_backup_list_parser = subparsers.add_parser("config-backup-list", help="查看最近配置备份")
+    config_backup_list_parser.set_defaults(func=config_backup_list_command)
+
+    config_rollback_parser = subparsers.add_parser("config-rollback", help="回滚配置备份")
+    config_rollback_parser.add_argument("--latest", action="store_true", help="回滚到最新备份")
+    config_rollback_parser.set_defaults(func=config_rollback_command)
+
+    config_change_log_parser = subparsers.add_parser("config-change-log", help="查看最近配置修改记录")
+    config_change_log_parser.set_defaults(func=config_change_log_command)
+
     daily_parser = subparsers.add_parser("daily", help="运行一键每日工作流")
     daily_parser.add_argument("--start-date", default="2018-01-01", help="组合回测开始日期，默认 2018-01-01")
     daily_parser.add_argument("--skip-backtest", action="store_true", help="跳过组合回测，使用已有回测报告")
     daily_parser.add_argument("--quick", action="store_true", help="快速模式：跳过组合回测和资产贡献分析")
+    daily_parser.add_argument("--skip-quant", action="store_true", help="跳过量化信号刷新，使用已有 quant_signal_report.json")
+    daily_parser.add_argument("--include-watchlist", action="store_true", help="daily 中同步分析观察池基金")
     daily_parser.add_argument("--open-report", action="store_true", help="尝试打开 data/committee_report.md")
     daily_parser.add_argument("--clean-proxy", action="store_true", help="daily 执行期间临时移除代理环境变量")
     daily_parser.add_argument("--debug-network", action="store_true", help="输出 daily 网络环境和 DNS 诊断信息")
@@ -1407,6 +1862,39 @@ def parse_args():
     asset_dca_audit_parser = subparsers.add_parser("asset-dca-audit", help="审计单个资产的定投买入和净值口径")
     asset_dca_audit_parser.add_argument("asset", help="资产 ID 或代表基金代码，例如 DIVIDEND_LOW_VOL 或 008163")
     asset_dca_audit_parser.set_defaults(func=run_asset_dca_audit_command)
+
+    quant_signal_parser = subparsers.add_parser("quant-signal", help="生成资产量化信号报告")
+    quant_signal_parser.set_defaults(func=run_quant_signal_command)
+
+    quant_signal_detail_parser = subparsers.add_parser("quant-signal-detail", help="查看资产量化信号详细指标")
+    quant_signal_detail_parser.set_defaults(func=show_quant_signal_detail)
+
+    watchlist_add_parser = subparsers.add_parser("watchlist-add", help="添加基金到观察池")
+    watchlist_add_parser.add_argument("fund_code", help="基金代码")
+    watchlist_add_parser.add_argument("--name", required=True, help="基金名称")
+    watchlist_add_parser.add_argument("--role", default="unknown", choices=["satellite", "core", "hedge", "factor", "theme", "bond", "unknown"], help="候选角色")
+    watchlist_add_parser.add_argument("--reason", default="", help="关注原因")
+    watchlist_add_parser.add_argument("--nav-mode", default="unit_nav", choices=["unit_nav", "accumulated_nav"], help="净值口径")
+    watchlist_add_parser.add_argument("--dry-run", action="store_true", help="只预览修改，不写入文件")
+    watchlist_add_parser.set_defaults(func=watchlist_add_command)
+
+    watchlist_report_parser = subparsers.add_parser("watchlist-report", help="查看基金观察池")
+    watchlist_report_parser.set_defaults(func=watchlist_report_command)
+
+    watchlist_analyze_parser = subparsers.add_parser("watchlist-analyze", help="分析观察池候选基金")
+    watchlist_analyze_parser.add_argument("fund_code", help="基金代码")
+    watchlist_analyze_parser.add_argument("--weekly-dca", type=float, default=20, help="候选基金每周定投模拟金额，默认20元")
+    watchlist_analyze_parser.add_argument("--start-date", help="定投模拟开始日期，格式 YYYY-MM-DD")
+    watchlist_analyze_parser.set_defaults(func=watchlist_analyze_command)
+
+    watchlist_remove_parser = subparsers.add_parser("watchlist-remove", help="从观察池移除基金")
+    watchlist_remove_parser.add_argument("fund_code", help="基金代码")
+    watchlist_remove_parser.add_argument("--dry-run", action="store_true", help="只预览修改，不写入文件")
+    watchlist_remove_parser.set_defaults(func=watchlist_remove_command)
+
+    watchlist_promote_parser = subparsers.add_parser("watchlist-promote", help="生成候选基金转入真实持仓的配置建议")
+    watchlist_promote_parser.add_argument("fund_code", help="基金代码")
+    watchlist_promote_parser.set_defaults(func=watchlist_promote_command)
 
     portfolio_report_parser = subparsers.add_parser("portfolio-report", help="查看最近一次组合回测摘要")
     portfolio_report_parser.set_defaults(func=show_portfolio_report)

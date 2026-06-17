@@ -456,3 +456,226 @@ fallback 顺序：
 - 缓存过期会 warning；fresh cache 在 daily 中作为 info，不直接导致失败。
 
 本次不修改补仓策略逻辑，不修改 portfolio-backtest 计算逻辑。
+
+## V4.3 Committee Report Polish
+
+本次完成一页投委会日报美化，属于报告展示层优化，不改变任何投资策略、补仓策略或 portfolio-backtest 计算逻辑。
+
+新增能力：
+
+- `committee-report` 默认输出美化版 Markdown。
+- 顶部新增“一页摘要”，覆盖补仓状态、子弹仓、核心资产、卫星资产、防守资产和再平衡状态。
+- 新增红黄绿状态系统，用于区分正常、关注和需要处理的问题。
+- 新增“今日操作清单”，用于每日快速确认是否补仓、卖出、调整定投或关注 HSTECH。
+- 今日补仓检查、资产贡献分析、再平衡建议改为表格展示。
+- 新增“系统健康状态”，优先读取 `data/daily_run_report.json`。
+- 新增 Infos / Warnings / Errors 展示区。
+- `committee_report.json` 保持旧字段兼容，并新增 `one_page_summary`、`action_checklist`、`traffic_light_status`、`system_health`。
+- 新增 `python3 main.py committee-report --plain`，输出无 emoji 的简洁版本。
+
+影响范围：
+
+- 只修改 `drawdownguard/committee_report.py` 的报告生成与渲染。
+- `main.py` 仅新增 `committee-report --plain` 参数并传入 daily workflow 状态。
+- 不修改补仓策略逻辑。
+- 不修改 portfolio-backtest 计算逻辑。
+
+## V5.0 Interactive Control Center
+
+本次新增交互式控制中心和命令式配置管理能力，将 DrawdownGuard 从开发者配置工具升级为本地个人基金管理系统。
+
+新增交互命令：
+
+```bash
+python3 main.py interactive
+```
+
+控制中心菜单支持：
+
+- 查看账户总览、当前持仓、今日投委会报告。
+- 运行 `daily --quick` 和完整体检。
+- 更新子弹仓金额。
+- 更新基金持仓金额。
+- 添加/删除观察基金。
+- 添加、修改、暂停、恢复定投计划。
+- 查看 `policy-check`。
+- 备份当前配置。
+- 回滚到上一个备份。
+
+新增命令式配置管理：
+
+```bash
+python3 main.py cash-update --amount 1883
+python3 main.py holding-update <fund_code> --amount <amount>
+python3 main.py holding-add <fund_code> --name "<name>" --asset-id <asset_id> --role <role> --amount <amount>
+python3 main.py holding-remove <fund_code>
+python3 main.py dca-add <fund_code> --amount <amount> --frequency weekly --weekday thu
+python3 main.py dca-update <fund_code> --amount <amount>
+python3 main.py dca-pause <fund_code>
+python3 main.py dca-resume <fund_code>
+python3 main.py config-backup
+python3 main.py config-backup-list
+python3 main.py config-rollback --latest
+python3 main.py config-change-log
+```
+
+配置安全机制：
+
+- 所有实际修改前自动备份到 `data/backups/YYYY-MM-DD_HH-MM-SS/`。
+- 所有修改后自动运行 `policy-check`。
+- 所有修改写入 `data/config_change_log.json`。
+- 所有修改命令支持 `--dry-run`。
+- `config-rollback --latest` 可恢复最近一次备份。
+
+允许修改：
+
+- `data/user_profile.json` 的子弹仓金额。
+- `data/current_holdings.json` 的持仓金额、新增/删除持仓、role、nav_mode。
+- `data/dca_plan.json` 的定投计划金额和状态。
+- `data/watchlist_funds.json` 的观察基金。
+
+禁止自动修改：
+
+- 补仓策略核心规则。
+- `strategy_activation_date`。
+- 历史触发记录。
+- `records.json`。
+
+本次不修改补仓策略逻辑，不修改 portfolio-backtest 计算逻辑，不修改 rebalance-advice 计算逻辑。
+- 不修改 rebalance-advice 计算逻辑。
+
+## V4.6 Fund Watchlist / Candidate Fund Analyzer
+
+本次新增基金观察池与候选基金分析，用于研究尚未买入的基金。观察池不会污染真实持仓、定投计划或补仓策略。
+
+新增文件：
+
+- `data/watchlist_funds.json`
+
+新增命令：
+
+```bash
+python3 main.py watchlist-add <fund_code> --name "基金名称" --role satellite --reason "关注原因"
+python3 main.py watchlist-report
+python3 main.py watchlist-analyze <fund_code>
+python3 main.py watchlist-remove <fund_code>
+python3 main.py watchlist-promote <fund_code>
+```
+
+能力：
+
+- 添加观察基金，默认 `allow_dca=false`、`allow_drawdown_buy=false`。
+- 查看观察池基金列表。
+- 对单只候选基金进行数据检查、量化信号、DCA 模拟和组合适配分析。
+- `watchlist-promote` 只生成手动配置片段，不自动修改真实配置。
+- committee-report 新增“观察基金”板块。
+- daily 默认不分析观察池；使用 `python3 main.py daily --quick --include-watchlist` 时才刷新观察池分析。
+
+安全边界：
+
+- 不自动买入。
+- 不自动加入定投。
+- 不自动允许补仓。
+- 不修改 `data/current_holdings.json`。
+- 不修改 `data/dca_plan.json`。
+- 不修改 `data/policy_config.json`。
+- 不修改补仓策略逻辑。
+- 不修改 portfolio-backtest 计算逻辑。
+
+## V4.4 Quant Signal Engine
+
+本次新增量化信号引擎，作为 DrawdownGuard 的辅助分析层。该模块只生成趋势、动量、波动、回撤和风险状态，不自动交易，不改变补仓策略、portfolio-backtest 或 rebalance-advice。
+
+新增命令：
+
+```bash
+python3 main.py quant-signal
+python3 main.py quant-signal-detail
+```
+
+新增输出：
+
+- `data/quant_signal_report.json`
+
+第一版支持：
+
+- `NASDAQ100`：270042，`unit_nav`
+- `HSTECH`：012349，`unit_nav`
+- `CASHFLOW`：023918，`unit_nav`
+- `DIVIDEND_LOW_VOL`：008163，`accumulated_nav`
+- `GOLD`：000216，`unit_nav`
+
+新增指标：
+
+- 当前净值、最新日期、250 日高点、250 日高点回撤。
+- MA20、MA60、MA120。
+- 当前净值相对 MA20 / MA60 / MA120。
+- 20 / 60 / 120 日收益率。
+- 20 / 60 日波动率。
+- 250 日最大回撤。
+- `trend_score`、`momentum_score`、`risk_score`、`volatility_score`、`quant_score`。
+- `signal_status` 和辅助标签。
+
+组合级输出：
+
+- `average_quant_score`
+- `core_asset_score`
+- `defensive_asset_score`
+- `satellite_asset_score`
+- `market_regime`
+
+投委会报告接入：
+
+- 一页摘要新增“市场环境”。
+- 新增“量化信号”表格，展示资产分数、状态、趋势、风险和结论。
+
+限制：
+
+- 不作为买卖指令。
+- 不修改补仓策略逻辑。
+- 不修改组合回测计算逻辑。
+- 不修改再平衡建议逻辑。
+
+## V4.5 Daily Workflow Quant Signal Integration
+
+本次将 V4.4 Quant Signal Engine 接入 daily workflow，保证每日运行 `daily` 时会先刷新量化信号，再生成投委会报告。
+
+daily 默认执行顺序：
+
+1. `policy-check`
+2. `run`
+3. `portfolio-backtest`
+4. `contribution-report`
+5. `quant-signal`
+6. `rebalance-advice`
+7. `committee-report`
+
+daily quick 执行顺序：
+
+1. `policy-check`
+2. `run`
+3. `quant-signal`
+4. `rebalance-advice`
+5. `committee-report`
+
+新增参数：
+
+```bash
+python3 main.py daily --skip-quant
+```
+
+行为：
+
+- 默认 daily 和 quick 模式都会刷新 `data/quant_signal_report.json`。
+- `--skip-quant` 会跳过本次量化信号刷新，并记录 info。
+- `daily_run_report.json` 的 `steps` 新增 `quant-signal`。
+- `today_conclusion` 新增 `quant_market_regime`、`average_quant_score`、`core_asset_score`。
+- `committee-report` 优先使用 daily_run_report 中的量化市场状态；没有则 fallback 到 `quant_signal_report.json`。
+- quant-signal 使用 fresh cache 只作为 info，不导致 warning。
+- quant-signal 部分资产数据不足会标记 warning，但不会导致 daily failed。
+
+限制：
+
+- 不修改补仓策略逻辑。
+- 不修改 portfolio-backtest 计算逻辑。
+- 不修改 rebalance-advice 计算逻辑。

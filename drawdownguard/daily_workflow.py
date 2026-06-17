@@ -185,6 +185,8 @@ def format_daily_summary(report):
     lines.append(f"* 是否触发补仓：{conclusion.get('drawdown_triggered', 'N/A')}")
     lines.append(f"* 是否需要立即再平衡：{conclusion.get('needs_immediate_rebalance', 'N/A')}")
     lines.append(f"* 未来定投方向：{conclusion.get('future_dca_bias', 'N/A')}")
+    lines.append(f"* 市场环境：{conclusion.get('quant_market_regime', 'N/A')}")
+    lines.append(f"* 核心资产量化分数：{conclusion.get('core_asset_score', 'N/A')}")
     if report.get("infos"):
         lines.append("")
         lines.append("Infos:")

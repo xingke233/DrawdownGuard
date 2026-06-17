@@ -10,6 +10,8 @@ data/*.json
 !data/current_holdings.json
 !data/dca_plan.json
 !data/policy_config.json
+!data/watchlist_funds.json
 data/nav_cache.json
+data/backups/
 config.local.yaml
 *.backup.json

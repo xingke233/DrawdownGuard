@@ -1093,6 +1093,26 @@ data/committee_report.json
 
 如果某个上游报告不存在，投委会报告会显示“暂无数据，请先运行对应命令”，不会中断生成。
 
+### V4.3 一页投委会日报
+
+`committee-report` 默认生成美化版个人投委会日报，顶部包含一页摘要、今日操作清单、系统健康状态，以及 Infos / Warnings / Errors 分级提示。
+
+```bash
+python3 main.py committee-report
+python3 main.py committee-report --plain
+```
+
+美化版报告新增：
+
+- 一页摘要：补仓状态、子弹仓、核心资产、卫星资产、防守资产、再平衡。
+- 红黄绿状态：绿色表示正常，黄色表示关注或未来定投倾斜，红色表示需要处理。
+- 今日补仓检查表格：基金、当前回撤、状态、建议。
+- 资产贡献表格：投入权重、市值权重、收益率、收益贡献、最大回撤。
+- 再平衡建议表格：大类当前权重、目标区间、状态、建议。
+- 系统健康状态：优先读取 `data/daily_run_report.json`。
+
+`--plain` 会输出无 emoji 的简洁版本，便于复制到不支持表格或 emoji 的环境。
+
 ## V4.0 Daily Workflow
 
 `daily` 命令把每日常用流程合并为一键执行。它只编排已有功能，不自动交易，不改变补仓策略或组合回测计算。
@@ -1114,6 +1134,8 @@ python3 main.py daily --start-date 2018-01-01
 ```bash
 python3 main.py daily --skip-backtest
 python3 main.py daily --quick --clean-proxy
+python3 main.py daily --quick --skip-quant
+python3 main.py daily --quick --include-watchlist
 python3 main.py daily --open-report
 ```
 
@@ -1123,15 +1145,17 @@ python3 main.py daily --open-report
 2. `run`
 3. `portfolio-backtest`
 4. `contribution-report`
-5. `rebalance-advice`
-6. `committee-report`
+5. `quant-signal`
+6. `rebalance-advice`
+7. `committee-report`
 
 `--quick` 流程：
 
 1. `policy-check`
 2. `run`
-3. `rebalance-advice`
-4. `committee-report`
+3. `quant-signal`
+4. `rebalance-advice`
+5. `committee-report`
 
 新增输出：
 
@@ -1144,6 +1168,10 @@ data/committee_report.json
 如果某一步失败，workflow 会记录 failed step，继续执行后续能执行的步骤；如果投委会报告无法生成，daily 状态为 `failed`。
 
 `--clean-proxy` 会在 daily 执行期间临时移除 `http_proxy`、`https_proxy`、`HTTP_PROXY`、`HTTPS_PROXY`、`all_proxy`、`ALL_PROXY`，用于排查代理环境导致的净值拉取问题。
+
+`--skip-quant` 会跳过本次量化信号刷新，并让投委会报告使用已有 `data/quant_signal_report.json`；如果文件不存在，报告显示暂无量化信号。
+
+`--include-watchlist` 会在 daily 中额外分析观察池基金；默认不启用，避免日常 quick 变慢。
 
 ## V4.2 本地净值缓存
 
@@ -1187,3 +1215,167 @@ python3 main.py cache-clear --yes
 - `portfolio-backtest` 使用缓存超过 90 天会提示过期。
 - run 使用缓存不足 250 条会提示阶段高点可能不准确。
 - `data/nav_cache.json` 是运行缓存文件，不提交到 Git。
+
+## V4.4 Quant Signal Engine
+
+Quant Signal Engine 是量化分析层，只生成趋势、动量、波动和风险信号，不自动交易，不改变补仓策略、组合回测或再平衡建议。
+
+命令：
+
+```bash
+python3 main.py quant-signal
+python3 main.py quant-signal-detail
+```
+
+输出：
+
+```text
+data/quant_signal_report.json
+```
+
+第一版支持资产：
+
+- `NASDAQ100`：270042，`unit_nav`
+- `HSTECH`：012349，`unit_nav`
+- `CASHFLOW`：023918，`unit_nav`
+- `DIVIDEND_LOW_VOL`：008163，`accumulated_nav`
+- `GOLD`：000216，`unit_nav`
+
+量化指标包括：
+
+- 250 日高点与当前回撤
+- MA20 / MA60 / MA120
+- 当前净值相对均线位置
+- 20 / 60 / 120 日收益率
+- 20 / 60 日波动率
+- 250 日最大回撤
+- `trend_score`、`momentum_score`、`risk_score`、`volatility_score`
+- `quant_score`
+
+`quant_score` 范围为 0-100，计算权重：
+
+```text
+quant_score =
+0.35 * trend_score
++ 0.30 * momentum_score
++ 0.25 * risk_score
++ 0.10 * volatility_score
+```
+
+`signal_status`：
+
+- `strong_uptrend`：80-100
+- `healthy`：60-80
+- `neutral`：40-60
+- `weak`：20-40
+- `high_risk`：0-20
+
+`committee-report` 会自动读取 `data/quant_signal_report.json`，在一页摘要中显示市场环境，并新增“量化信号”表格。
+
+## V4.6 Fund Watchlist / Candidate Fund Analyzer
+
+观察池用于研究用户感兴趣但尚未买入的基金。观察池基金不会进入真实持仓、定投计划或补仓 allow list。
+
+新增文件：
+
+```text
+data/watchlist_funds.json
+```
+
+新增命令：
+
+```bash
+python3 main.py watchlist-add <fund_code> --name "基金名称" --role satellite --reason "关注原因"
+python3 main.py watchlist-report
+python3 main.py watchlist-analyze <fund_code>
+python3 main.py watchlist-analyze <fund_code> --weekly-dca 20 --start-date 2021-01-01
+python3 main.py watchlist-remove <fund_code>
+python3 main.py watchlist-promote <fund_code>
+```
+
+默认安全规则：
+
+- `allow_dca = false`
+- `allow_drawdown_buy = false`
+- 不修改 `data/current_holdings.json`
+- 不修改 `data/dca_plan.json`
+- 不修改 `data/policy_config.json`
+
+`watchlist-analyze` 会输出：
+
+- 基金数据检查
+- 250 日高点和当前回撤
+- MA20 / MA60 / MA120
+- 20 / 60 / 120 日收益率
+- 20 / 60 日波动率
+- 最大回撤
+- `quant_score` 和 `signal_status`
+- 默认每周 20 元的候选基金 DCA 模拟
+- 与当前组合的关系分析
+
+`watchlist-promote` 第一版只生成手动配置片段，不会自动修改真实持仓或策略配置。
+
+`committee-report` 会读取 `data/watchlist_analysis_report.json`，显示“观察基金”板块。
+
+## V5.0 Interactive Control Center
+
+Interactive Control Center 让用户可以在本地交互式维护账户配置，不需要通过 Codex 手动改 JSON。
+
+启动：
+
+```bash
+python3 main.py interactive
+```
+
+控制中心支持：
+
+- 查看账户总览
+- 查看当前持仓
+- 查看今日投委会报告
+- 运行 `daily --quick`
+- 运行完整体检 `daily --start-date 2018-01-01`
+- 更新子弹仓金额
+- 更新基金持仓金额
+- 添加/删除观察基金
+- 添加、修改、暂停、恢复定投计划
+- 查看 `policy-check`
+- 备份当前配置
+- 回滚到上一个备份
+
+命令式配置管理：
+
+```bash
+python3 main.py cash-update --amount 1883
+python3 main.py holding-update 270042 --amount 2038
+python3 main.py holding-add 999999 --name "基金名称" --asset-id SATELLITE_TEST --role satellite --amount 100
+python3 main.py holding-remove 999999
+python3 main.py dca-add 270042 --amount 10 --frequency weekly --weekday thu
+python3 main.py dca-update 012752 --amount 40
+python3 main.py dca-pause 012752
+python3 main.py dca-resume 012752
+python3 main.py config-backup
+python3 main.py config-backup-list
+python3 main.py config-rollback --latest
+python3 main.py config-change-log
+```
+
+所有修改类命令都支持 dry-run：
+
+```bash
+python3 main.py holding-update 270042 --amount 2200 --dry-run
+```
+
+自动备份：
+
+- 每次实际修改前自动备份真实配置到 `data/backups/YYYY-MM-DD_HH-MM-SS/`
+- 修改后自动运行 `policy-check`
+- 修改记录写入 `data/config_change_log.json`
+- `config-rollback --latest` 会恢复最近一次备份并重新运行 `policy-check`
+
+安全限制：
+
+- 不自动交易
+- 不修改补仓策略核心规则
+- 不修改 `strategy_activation_date`
+- 不修改历史触发记录或 `records.json`
+- 观察基金不会自动进入真实持仓、定投计划或补仓 allow list

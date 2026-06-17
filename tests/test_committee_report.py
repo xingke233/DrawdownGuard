@@ -19,12 +19,14 @@ class CommitteeReportTest(unittest.TestCase):
         self.assertEqual(report["sections"]["portfolio_backtest_summary"]["status"], "missing")
         self.assertEqual(report["sections"]["contribution_analysis"]["status"], "missing")
         self.assertEqual(report["sections"]["rebalance_advice"]["status"], "missing")
+        self.assertEqual(report["system_health"]["status"], "missing")
         self.assertIn("暂无数据", report["markdown"])
+        self.assertIn("一页摘要", report["markdown"])
 
     def test_markdown_and_json_are_saved(self):
         config = apply_real_profile(_base_config(), _real_data())
         rebalance = build_rebalance_advice(config)
-        report = build_committee_report(config, rebalance_advice=rebalance)
+        report = build_committee_report(config, rebalance_advice=rebalance, daily_run_report=_daily_run_report())
 
         with TemporaryDirectory() as temp_dir:
             storage = Storage(Path(temp_dir))
@@ -35,9 +37,13 @@ class CommitteeReportTest(unittest.TestCase):
 
             self.assertTrue(md_path.exists())
             self.assertTrue(json_path.exists())
-            self.assertIn("DrawdownGuard 个人投委会报告", md_path.read_text(encoding="utf-8"))
+            self.assertIn("DrawdownGuard 个人投委会日报", md_path.read_text(encoding="utf-8"))
             saved = json.loads(json_path.read_text(encoding="utf-8"))
             self.assertIn("sections", saved)
+            self.assertIn("one_page_summary", saved)
+            self.assertIn("action_checklist", saved)
+            self.assertIn("traffic_light_status", saved)
+            self.assertIn("system_health", saved)
             self.assertNotIn("markdown", saved)
 
     def test_conclusion_contains_core_advice(self):
@@ -101,12 +107,42 @@ class CommitteeReportTest(unittest.TestCase):
             portfolio_backtest_report=portfolio_report,
             contribution_report=contribution_report,
             rebalance_advice=rebalance,
+            daily_run_report=_daily_run_report(),
         )
 
         self.assertIn("今日补仓检查", report["markdown"])
         self.assertIn("组合回测摘要", report["markdown"])
         self.assertIn("资产贡献分析", report["markdown"])
         self.assertIn("再平衡建议", report["markdown"])
+        self.assertIn("| 基金 | 当前回撤 | 状态 | 建议 |", report["markdown"])
+        self.assertIn("| 资产 | 投入权重 | 市值权重 | 收益率 | 收益贡献 | 最大回撤 |", report["markdown"])
+
+    def test_polished_report_contains_summary_checklist_traffic_and_health(self):
+        config = apply_real_profile(_base_config(), _real_data())
+        rebalance = build_rebalance_advice(config)
+
+        report = build_committee_report(config, rebalance_advice=rebalance, daily_run_report=_daily_run_report())
+        markdown = report["markdown"]
+
+        self.assertIn("## 一页摘要", markdown)
+        self.assertIn("## 今日操作清单", markdown)
+        self.assertIn("🟢", markdown)
+        self.assertIn("🟡", markdown)
+        self.assertIn("## 系统健康状态", markdown)
+        self.assertIn("| policy-check | OK |", markdown)
+        self.assertEqual(report["traffic_light_status"]["cash"]["color"], "green")
+        self.assertIn("one_page_summary", report)
+
+    def test_plain_mode_has_no_emoji(self):
+        config = apply_real_profile(_base_config(), _real_data())
+        rebalance = build_rebalance_advice(config)
+
+        report = build_committee_report(config, rebalance_advice=rebalance, daily_run_report=_daily_run_report(), plain=True)
+
+        self.assertIn("DrawdownGuard 个人投委会报告", report["markdown"])
+        self.assertNotIn("🟢", report["markdown"])
+        self.assertNotIn("🟡", report["markdown"])
+        self.assertNotIn("🔴", report["markdown"])
 
 
 def _base_config():
@@ -160,3 +196,20 @@ def _real_data():
         },
     }
 
+
+def _daily_run_report():
+    return {
+        "date": "2026-06-16",
+        "status": "success",
+        "steps": [
+            {"name": "policy-check", "status": "success"},
+            {"name": "run", "status": "success"},
+            {"name": "portfolio-backtest", "status": "skipped"},
+            {"name": "contribution-report", "status": "skipped"},
+            {"name": "rebalance-advice", "status": "success"},
+            {"name": "committee-report", "status": "success"},
+        ],
+        "infos": ["quick 模式跳过 portfolio-backtest"],
+        "warnings": [],
+        "errors": [],
+    }

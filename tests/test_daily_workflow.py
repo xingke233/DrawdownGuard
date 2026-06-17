@@ -196,6 +196,8 @@ class DailyWorkflowTest(unittest.TestCase):
                 "drawdown_triggered": False,
                 "needs_immediate_rebalance": False,
                 "future_dca_bias": "CORE",
+                "quant_market_regime": "neutral",
+                "core_asset_score": 92,
             },
         )
 
@@ -204,6 +206,100 @@ class DailyWorkflowTest(unittest.TestCase):
         self.assertIn("DrawdownGuard Daily Workflow", summary)
         self.assertIn("data/committee_report.md", summary)
         self.assertIn("未来定投方向：CORE", summary)
+        self.assertIn("市场环境：neutral", summary)
+        self.assertIn("核心资产量化分数：92", summary)
+
+    def test_daily_default_includes_quant_signal_step(self):
+        import main
+
+        steps = main._daily_steps(_daily_args(quick=False))
+
+        self.assertEqual(
+            [step["name"] for step in steps],
+            [
+                "policy-check",
+                "run",
+                "portfolio-backtest",
+                "contribution-report",
+                "quant-signal",
+                "watchlist-analyze",
+                "rebalance-advice",
+                "committee-report",
+            ],
+        )
+
+    def test_daily_quick_includes_quant_before_rebalance(self):
+        import main
+
+        steps = main._daily_steps(_daily_args(quick=True))
+        names = [step["name"] for step in steps]
+
+        self.assertIn("quant-signal", names)
+        self.assertLess(names.index("quant-signal"), names.index("rebalance-advice"))
+        self.assertLess(names.index("watchlist-analyze"), names.index("rebalance-advice"))
+        self.assertTrue(steps[names.index("portfolio-backtest")]["skip"])
+        self.assertTrue(steps[names.index("contribution-report")]["skip"])
+        self.assertTrue(steps[names.index("watchlist-analyze")]["skip"])
+        self.assertFalse(steps[names.index("quant-signal")].get("skip", False))
+
+    def test_skip_quant_skips_step_and_writes_info(self):
+        report = run_daily_workflow(
+            [
+                {
+                    "name": "quant-signal",
+                    "func": lambda: {"status": "success", "message": "should not run"},
+                    "skip": True,
+                    "skip_message": "daily --skip-quant 已跳过量化信号刷新，committee-report 将使用已有 quant_signal_report.json。",
+                },
+                {"name": "committee-report", "func": lambda: {"status": "success", "message": "OK"}},
+            ],
+            save_report=lambda item: None,
+        )
+
+        self.assertEqual(report["steps"][0]["status"], "skipped")
+        self.assertIn("daily --skip-quant 已跳过量化信号刷新", report["infos"][0])
+        self.assertEqual(report["status"], "success")
+
+    def test_daily_conclusion_contains_quant_fields(self):
+        import main
+
+        quant_report = {
+            "portfolio_quant_summary": {
+                "market_regime": "neutral",
+                "average_quant_score": 62,
+                "core_asset_score": 92,
+            }
+        }
+
+        with patch.object(main.Storage, "load_daily_logs", return_value=[]), patch.object(
+            main.Storage,
+            "load_rebalance_advice",
+            return_value={"conclusion": {"needs_immediate_rebalance": False, "future_dca_bias": "CORE"}},
+        ), patch.object(main.Storage, "load_quant_signal_report", return_value=quant_report):
+            conclusion = main._build_daily_conclusion()
+
+        self.assertEqual(conclusion["quant_market_regime"], "neutral")
+        self.assertEqual(conclusion["average_quant_score"], 62)
+        self.assertEqual(conclusion["core_asset_score"], 92)
+
+    def test_quant_warning_does_not_make_daily_failed(self):
+        report = run_daily_workflow(
+            [
+                {
+                    "name": "quant-signal",
+                    "func": lambda: {
+                        "status": "warning",
+                        "message": "量化信号完成，但存在数据 warning。",
+                        "warnings": ["CASHFLOW: 净值数据不足120条"],
+                    },
+                },
+                {"name": "committee-report", "func": lambda: {"status": "success", "message": "OK"}},
+            ],
+            save_report=lambda item: None,
+        )
+
+        self.assertEqual(report["status"], "warning")
+        self.assertNotEqual(report["status"], "failed")
 
     def test_clean_proxy_removes_and_restores_proxy_environment(self):
         previous = {key: os.environ.get(key) for key in PROXY_ENV_KEYS}
@@ -353,3 +449,15 @@ def _restore_env(previous):
             os.environ.pop(key, None)
         else:
             os.environ[key] = previous[key]
+
+
+def _daily_args(quick=False, skip_quant=False):
+    return SimpleNamespace(
+        config="config.yaml",
+        nav_file="nav_data.json",
+        start_date="2018-01-01",
+        quick=quick,
+        skip_backtest=False,
+        skip_quant=skip_quant,
+        include_watchlist=False,
+    )

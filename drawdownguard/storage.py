@@ -110,6 +110,27 @@ class Storage:
     def load_committee_report(self):
         return self._load_json("committee_report.json", {})
 
+    def save_quant_signal_report(self, report):
+        self._save_json("quant_signal_report.json", report)
+
+    def load_quant_signal_report(self):
+        return self._load_json("quant_signal_report.json", {})
+
+    def save_watchlist_funds(self, report):
+        self._save_json("watchlist_funds.json", report)
+
+    def load_watchlist_funds(self):
+        return self._load_json("watchlist_funds.json", {"funds": []})
+
+    def save_watchlist_analysis_report(self, report):
+        self._save_json("watchlist_analysis_report.json", report)
+
+    def load_watchlist_analysis_report(self):
+        return self._load_json("watchlist_analysis_report.json", {})
+
+    def save_watchlist_fund_analysis(self, fund_code, report):
+        self._save_json(f"watchlist_analysis_{fund_code}.json", report)
+
     def save_daily_run_report(self, report):
         self._save_json("daily_run_report.json", report)
 
