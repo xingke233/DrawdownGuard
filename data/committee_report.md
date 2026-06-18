@@ -1,6 +1,6 @@
 # DrawdownGuard 个人投委会日报
 
-生成日期：2026-06-17
+生成日期：2026-06-18
 账户状态：关注
 今日结论：今日不补仓，不卖出，未来资金按建议倾斜，核心资产低于目标区间，未来定投倾斜
 
@@ -15,6 +15,7 @@
 | 防守资产 | 🟡 偏高 | 不卖出，未来少新增债券 |
 | 再平衡 | 🟡 定投倾斜 | 不卖出，未来资金按建议倾斜 |
 | 市场环境 | 🟡 neutral | 市场环境中性，继续观察 |
+| 新闻风险 | 🟡 medium | 新闻风险中等，继续观察 |
 
 ## 今日操作清单
 
@@ -30,35 +31,37 @@
 | --- | --- |
 | policy-check | OK |
 | run | OK |
-| portfolio-backtest | WARNING |
-| contribution-report | OK |
+| portfolio-backtest | SKIPPED |
+| contribution-report | SKIPPED |
 | quant-signal | OK |
+| watchlist-analyze | WARNING |
 | rebalance-advice | OK |
 | committee-report | OK |
 
 ## Infos / Warnings / Errors
 
 ### Infos
-- 270042: 真实净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/270042.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- 012752: 真实净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/012752.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- 012349: 真实净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/012349.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- 使用缓存净值
-- NASDAQ100: 012752 定投在资产级回测中使用代表基金 270042 净值作为 fallback。
-- NASDAQ100: 真实净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/270042.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- HSTECH: 真实净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/012349.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- CASHFLOW: 真实净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/023918.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- DIVIDEND_LOW_VOL: 累计净值获取失败，已回退到单位净值：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/008163.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- DIVIDEND_LOW_VOL: 单位净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/008163.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- GOLD: 真实净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/000216.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
+- daily quick/skip-backtest 模式已跳过组合回测。
+- daily quick 模式已跳过资产贡献分析。
+- 999999: 真实净值获取失败，已切换到缓存数据：b'Unknown JavaScript error during parse'
+- 999999: 真实净值获取失败，已切换到缓存数据：b'Unknown JavaScript error during parse'
 
 ### Warnings
-- NASDAQ100: 真实净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/270042.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- HSTECH: 真实净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/012349.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- CASHFLOW: 真实净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/023918.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- DIVIDEND_LOW_VOL: 累计净值获取失败，已回退到单位净值：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/008163.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- DIVIDEND_LOW_VOL: 单位净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/008163.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- GOLD: 真实净值获取失败，已切换到缓存数据：HTTPSConnectionPool(host='fund.eastmoney.com', port=443): Max retries exceeded with url: /pingzhongdata/000216.js (Caused by ProxyError('Unable to connect to proxy', NewConnectionError("HTTPSConnection(host='172.23.80.1', port=7893): Failed to establish a new connection: [Errno 1] Operation not permitted")))
-- portfolio-backtest: 组合回测完成，但存在数据 warning。
+- 025857: 净值数据不足250条，当前仅133条，仍按现有数据计算。
+- 025857: 净值数据不足250条，当前仅133条，仍按现有数据计算。
+- 025857: 净值数据不足250条，当前仅133条，250日高点和回撤仅按现有数据计算。
+- 999999: 缓存净值数据缺失。
+- 999999: 净值数据缺失，已跳过。
+- 999999: 本地净值文件不存在：/home/xingke233/projects/apps/DrawdownGuard/nav_data.json
+- 999999: 本地净值数据缺失。
+- 999999: 净值数据缺失，已跳过。
+- 999999: 缓存净值数据缺失。
+- 999999: 净值数据缺失，已跳过。
+- 999999: 本地净值文件不存在：/home/xingke233/projects/apps/DrawdownGuard/nav_data.json
+- 999999: 本地净值数据缺失。
+- 999999: 净值数据缺失，已跳过。
+- 999999: 净值数据不足，无法生成量化信号。
+- watchlist-analyze: 观察池分析完成，但存在数据 warning。
 
 ### Errors
 - 当前无 error。
@@ -84,7 +87,22 @@
 - ACTIVE_ADVANCED_MANUFACTURING / 先进制造：542.00 元，权重 5.05%，role active_fund
 - NONFERROUS_METALS / 有色金属：106.00 元，权重 0.99%，role cyclical_theme
 
-## 三、今日补仓检查
+## 三、定投状态
+
+- 每周 active 定投总额：125.00 元
+- 每月 active 定投总额：40.00 元
+- paused 定投数量：0
+
+| 状态 | 基金 | 金额 | 频率 | 资产 |
+| --- | --- | ---: | --- | --- |
+| active | 270042 广发纳斯达克100ETF联接A | 10.00 元 | weekly | NASDAQ100 |
+| active | 012752 建信纳斯达克100指数C(QDII) | 40.00 元 | weekly | NASDAQ100 |
+| active | 012349 天弘恒生科技ETF联接(QDII)C | 25.00 元 | weekly | HSTECH |
+| active | 008163 南方红利低波50ETF联接A | 20.00 元 | weekly | DIVIDEND_LOW_VOL |
+| active | 023918 华夏国证自由现金流ETF联接C | 30.00 元 | weekly | CASHFLOW |
+| active | 000216 华安黄金ETF联接A | 40.00 元 | monthly | GOLD |
+
+## 四、今日补仓检查
 
 - 允许补仓资产：270042, 012752, 012349
 - 检查日期：2026-06-17
@@ -93,7 +111,7 @@
 | --- | ---: | --- | --- |
 | 012349 天弘恒生科技ETF联接(QDII)C | -30.70% | 观察中 | 无 |
 
-## 四、组合回测摘要
+## 五、组合回测摘要
 
 - 回测区间：2018-01-02 至 2026-06-17
 - 总投入：42603.00 元
@@ -102,7 +120,7 @@
 - 补仓次数：18
 - 子弹仓消耗：1883.00 元
 
-## 五、资产贡献分析
+## 六、资产贡献分析
 
 - 最大收益贡献资产：NASDAQ100 / 纳斯达克100
 - 最大拖累资产：HSTECH / 恒生科技
@@ -120,7 +138,7 @@
 - DIVIDEND_LOW_VOL / 008163 使用 accumulated_nav 口径观察，避免分红基金单位净值低估。
 - HSTECH 维持小仓位卫星。
 
-## 六、再平衡建议
+## 七、再平衡建议
 
 | 大类 | 当前权重 | 目标区间 | 状态 | 建议 |
 | --- | ---: | --- | --- | --- |
@@ -136,7 +154,7 @@
 - 未来定投应偏向：CORE
 - 摘要：当前组合不需要立即卖出再平衡；核心资产低配，防守资产高于目标但未超上限，建议通过未来定投逐步向 NASDAQ100 倾斜。
 
-## 七、量化信号
+## 八、量化信号
 
 - 组合市场状态：neutral
 - 组合平均分：39
@@ -149,7 +167,26 @@
 | DIVIDEND_LOW_VOL | 40 | weak | 25 | 90 | 红利低波使用 accumulated_nav 口径，当前作为价值因子观察。 |
 | GOLD | 18 | high_risk | 25 | 15 | 黄金长期表现可作为对冲资产观察，但需注意阶段性高位和回撤风险。 |
 
-## 八、投委会结论
+## 九、每日新闻分析
+
+- 新闻情绪：positive
+- 新闻风险：medium
+- 相关新闻数量：1
+
+| 新闻 | 来源 | 影响资产 | 情绪 | 分数 | 重要性 | 结论 |
+| --- | --- | --- | --- | ---: | ---: | --- |
+| 美联储释放降息信号，科技股走强 | manual | NASDAQ100 | positive | 2 | 100 | 利率下行通常利好成长资产和债券，黄金可能受实际利率变化影响。 |
+
+## 十、观察基金
+
+| 基金 | 角色 | Category | Overlap | 建议 | Reasoning |
+| --- | --- | --- | --- | --- | --- |
+| 018957 某CPO基金 | satellite | high_risk_tech_theme | broad_style_overlap | consider_small_position | 科技成长暴露已经存在，趋势较强时也应控制仓位；主题拥挤，不建议直接新增大仓位。 |
+| 161226 白银 | satellite | commodity_cycle | broad_commodity_overlap | keep_watching | 与黄金同属贵金属大类但风险结构不同，白银等商品周期资产波动和回撤通常更高。 |
+| 025857 电网 | satellite | infrastructure_or_utility | insufficient_history | need_more_history | 历史数据不足250条，不能直接判断长期有效性。 |
+| 999999 候选基金 | satellite | unknown | insufficient_history | data_insufficient | 净值数据缺失，无法判断候选基金的长期有效性。 |
+
+## 十一、投委会结论
 
 - 当前不需要立即卖出。
 - NASDAQ100 仍是长期核心。
@@ -158,8 +195,10 @@
 - 债券不新增或少新增，未来现金流向 CORE 倾斜。
 - 黄金维持月定投。
 - 红利低波维持观察，并使用 accumulated_nav 口径。
+- 今日新闻不改变原有补仓规则。
+- 高影响新闻进入观察清单，新闻信号仅辅助判断，不作为买卖指令。
 
-## 九、风险提示
+## 十二、风险提示
 
 - 历史回测不代表未来收益。
 - 系统只辅助决策，不自动交易。

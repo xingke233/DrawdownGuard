@@ -542,11 +542,81 @@ python3 main.py config-change-log
 - `records.json`。
 
 本次不修改补仓策略逻辑，不修改 portfolio-backtest 计算逻辑，不修改 rebalance-advice 计算逻辑。
+
+## V5.1 Config State Enforcement
+
+本次让 V5.0 交互中心写入的配置状态真正进入系统计算链路。
+
+新增/强化能力：
+
+- DCA 支持 `status: active` / `status: paused`，缺失 status 默认 active。
+- `paused` DCA 不参与 `portfolio-backtest` 定投模拟。
+- `paused` DCA 不计入 `profile-report` active 定投金额。
+- `paused` DCA 不计入 `rebalance-advice` 的未来资金流向。
+- `committee-report` 和 `dca-report` 单独显示 paused DCA。
+- 新增 `python3 main.py dca-report`。
+- `holding-remove` 不再物理删除持仓，而是标记 `status: removed`、`archived: true`。
+- removed / archived 持仓不参与当前资产总额、权重、回测、再平衡和投委会当前持仓结构。
+- `holdings-report` 显示“历史/已移除持仓”。
+- watchlist 继续与真实组合隔离，不参与回测、再平衡、补仓检查或当前权重。
+- `config_change_log.json` 记录 `dca-pause`、`dca-resume`、`holding-remove`、`holding-update`、`cash-update` 等状态变化。
+
+安全边界：
+
+- 不修改 drawdown buy 触发规则。
+- 不修改 `records.json`。
+- 不自动交易。
+- 不自动把 watchlist 加入真实持仓。
+
+## V5.3 Daily Online News Fetcher
+
+本次新增每日在线新闻获取与分析系统，用于把财经新闻纳入投委会日报，但不改变任何交易、补仓、持仓或定投逻辑。
+
+新增文件：
+
+- `data/news_sources.json`
+- `data/news_cache.json`
+- `data/news_analysis_report.json`
+
+新增命令：
+
+```bash
+python3 main.py news-sources
+python3 main.py news-source-add --name "新闻源" --type rss --url "https://example.com/rss.xml" --category market
+python3 main.py news-source-enable "新闻源"
+python3 main.py news-source-disable "新闻源"
+python3 main.py news-fetch
+python3 main.py news-analyze
+python3 main.py news-report
+python3 main.py news-import --title "标题" --content "正文" --source "manual"
+python3 main.py daily --quick --include-news
+```
+
+已实现能力：
+
+- 自动读取 `data/news_sources.json` 中 enabled=true 的新闻源。
+- 第一版支持 RSS，普通网页抓取做容错补充。
+- 根据 `title + source + url` 生成 `news_id` 去重。
+- 新闻缓存最多保留 1000 条。
+- 新闻分析默认看最近 24 小时，可用 `news-analyze --days 3` 扩展。
+- 按真实组合资产和 watchlist 关键词匹配相关新闻。
+- 输出 `news_category`、`sentiment`、`impact_score`、`news_importance_score`、`confidence` 和 `suggested_follow_up`。
+- `committee-report` 新增“每日新闻分析”板块，一页摘要新增“新闻风险”。
+- `daily --include-news` 会执行 `news-fetch` 和 `news-analyze`，并在 `daily_run_report.json` 记录 `news_relevant_count`、`news_risk_alert_level`、`news_overall_tone`。
+
+安全边界：
+
+- 不自动交易。
+- 不修改真实持仓。
+- 不修改定投计划。
+- 不修改补仓策略。
+- 新闻信号只作为投委会辅助判断。
+- 不物理删除用户历史持仓数据。
 - 不修改 rebalance-advice 计算逻辑。
 
-## V4.6 Fund Watchlist / Candidate Fund Analyzer
+## V5.2 Watchlist / Candidate Fund Analyzer
 
-本次新增基金观察池与候选基金分析，用于研究尚未买入的基金。观察池不会污染真实持仓、定投计划或补仓策略。
+本次完成基金观察池与候选基金分析，用于研究尚未买入的基金。观察池继续与真实组合隔离，不污染真实持仓、定投计划、补仓策略或历史触发记录。
 
 新增文件：
 
@@ -555,9 +625,10 @@ python3 main.py config-change-log
 新增命令：
 
 ```bash
-python3 main.py watchlist-add <fund_code> --name "基金名称" --role satellite --reason "关注原因"
+python3 main.py watchlist-add <fund_code> --name "基金名称" --role satellite --reason "关注原因" --notes "备注"
 python3 main.py watchlist-report
 python3 main.py watchlist-analyze <fund_code>
+python3 main.py watchlist-analyze <fund_code> --weekly-dca 20 --start-date 2021-01-01
 python3 main.py watchlist-remove <fund_code>
 python3 main.py watchlist-promote <fund_code>
 ```
@@ -568,7 +639,7 @@ python3 main.py watchlist-promote <fund_code>
 - 查看观察池基金列表。
 - 对单只候选基金进行数据检查、量化信号、DCA 模拟和组合适配分析。
 - `watchlist-promote` 只生成手动配置片段，不自动修改真实配置。
-- committee-report 新增“观察基金”板块。
+- committee-report 读取 `data/watchlist_funds.json` 和 `data/watchlist_analysis_report.json`，未分析基金显示“尚未分析”。
 - daily 默认不分析观察池；使用 `python3 main.py daily --quick --include-watchlist` 时才刷新观察池分析。
 
 安全边界：

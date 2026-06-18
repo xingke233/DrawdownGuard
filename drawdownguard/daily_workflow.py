@@ -33,6 +33,9 @@ def run_daily_workflow(
         "cache_used": False,
         "cache_stale": False,
         "cache_last_updated": None,
+        "news_relevant_count": None,
+        "news_risk_alert_level": None,
+        "news_overall_tone": None,
         "steps": [],
         "final_report": final_report,
         "infos": [],
@@ -49,6 +52,10 @@ def run_daily_workflow(
                 report["cache_used"] = bool(result.get("cache_used"))
                 report["cache_stale"] = bool(result.get("cache_stale"))
                 report["cache_last_updated"] = result.get("cache_last_updated")
+            if result["name"] == "news-analyze":
+                report["news_relevant_count"] = result.get("news_relevant_count")
+                report["news_risk_alert_level"] = result.get("news_risk_alert_level")
+                report["news_overall_tone"] = result.get("news_overall_tone")
             report["infos"].extend(result.get("infos", []))
             report["warnings"].extend(result.get("warnings", []))
             report["errors"].extend(result.get("errors", []))
@@ -127,6 +134,9 @@ def _run_step(step):
         "warnings": warnings,
         "errors": errors,
         **({"result_source": result_source} if result_source else {}),
+        **({"news_relevant_count": value.get("news_relevant_count")} if value.get("news_relevant_count") is not None else {}),
+        **({"news_risk_alert_level": value.get("news_risk_alert_level")} if value.get("news_risk_alert_level") is not None else {}),
+        **({"news_overall_tone": value.get("news_overall_tone")} if value.get("news_overall_tone") is not None else {}),
         **({"traceback": value["traceback"]} if value.get("traceback") else {}),
     }
 
@@ -187,6 +197,8 @@ def format_daily_summary(report):
     lines.append(f"* 未来定投方向：{conclusion.get('future_dca_bias', 'N/A')}")
     lines.append(f"* 市场环境：{conclusion.get('quant_market_regime', 'N/A')}")
     lines.append(f"* 核心资产量化分数：{conclusion.get('core_asset_score', 'N/A')}")
+    lines.append(f"* 新闻风险：{conclusion.get('news_risk_alert_level', report.get('news_risk_alert_level', 'N/A'))}")
+    lines.append(f"* 新闻情绪：{conclusion.get('news_overall_tone', report.get('news_overall_tone', 'N/A'))}")
     if report.get("infos"):
         lines.append("")
         lines.append("Infos:")

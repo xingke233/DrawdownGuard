@@ -45,7 +45,10 @@ def apply_real_profile(config, real_data):
 
     profile_data = real_data.get("user_profile", {})
     holdings_data = real_data.get("current_holdings", {})
-    dca_plan = real_data.get("dca_plan", {})
+    active_holdings_data = _active_holdings_data(holdings_data)
+    removed_holdings = _removed_holdings(holdings_data)
+    dca_plan = _normalize_dca_plan(real_data.get("dca_plan", {}))
+    active_dca_plan = _active_dca_plan(dca_plan)
     policy_data = real_data.get("policy_config", {})
     bullet_cash = profile_data.get("bullet_cash", {})
     policy = policy_data.get("drawdown_buy_policy", {})
@@ -64,7 +67,8 @@ def apply_real_profile(config, real_data):
         **profile_data.get("life_account", {}),
         "participates_in_replenishment": False,
     }
-    config["holdings"] = holdings_data.get("holdings", [])
+    config["holdings"] = active_holdings_data.get("holdings", [])
+    config["removed_holdings"] = removed_holdings
     config["cleared_assets"] = holdings_data.get("cleared_assets", [])
     config["dca_plan"] = dca_plan
     config["drawdown_buy_policy"] = policy
@@ -82,11 +86,11 @@ def apply_real_profile(config, real_data):
             for item in policy.get("levels", config.get("replenishment_levels", []))
         ]
 
-    config["funds"] = _build_allowed_funds(holdings_data, policy, config.get("funds", []))
+    config["funds"] = _build_allowed_funds(active_holdings_data, policy, config.get("funds", []))
     config["portfolio_backtest"] = _build_portfolio_config(
         config.get("portfolio_backtest", {}),
-        holdings_data,
-        dca_plan,
+        active_holdings_data,
+        active_dca_plan,
         policy,
         bullet_cash,
     )
@@ -114,11 +118,14 @@ def summarize_profile(config):
     lines.append(f"核心资产占比：{totals['core_weight'] * 100:.2f}%")
     lines.append(f"卫星资产占比：{totals['satellite_weight'] * 100:.2f}%")
     lines.append(f"防守资产占比：{totals['defensive_weight'] * 100:.2f}%")
-    lines.append("当前定投计划：")
-    for item in config.get("dca_plan", {}).get("weekly", []):
-        lines.append(f"- 每周四 {item['fund_code']} {item['fund_name']} {item['amount']} 元")
-    for item in config.get("dca_plan", {}).get("monthly", []):
-        lines.append(f"- 每月{item.get('day', 1)}日 {item['fund_code']} {item['fund_name']} {item['amount']} 元")
+    active_dca, paused_dca = split_dca_items(config.get("dca_plan", {}))
+    lines.append("当前 active 定投计划：")
+    for item in active_dca:
+        lines.append(f"- {dca_frequency_label(item)} {item['fund_code']} {item['fund_name']} {item['amount']} 元")
+    if paused_dca:
+        lines.append("已暂停定投计划：")
+        for item in paused_dca:
+            lines.append(f"- {dca_frequency_label(item)} {item['fund_code']} {item['fund_name']} {item['amount']} 元（已暂停）")
     lines.append(f"允许补仓资产：{', '.join(allowed)}")
     lines.append(f"禁止补仓资产：{', '.join(blocked)}")
     lines.append(f"当前持仓资产数：{len(holdings)}")
@@ -145,6 +152,14 @@ def summarize_holdings_report(config):
         lines.append(f"- {role}: {item['amount']:.2f} 元 | {item['weight'] * 100:.2f}%")
     lines.append(f"NASDAQ100 合计：{totals['nasdaq_amount']:.2f} 元 | {totals['nasdaq_weight'] * 100:.2f}%")
     lines.append(f"债券合计：{totals['bonds_amount']:.2f} 元 | {totals['bonds_weight'] * 100:.2f}%")
+    removed = config.get("removed_holdings", [])
+    if removed:
+        lines.append("历史/已移除持仓：")
+        for asset in removed:
+            lines.append(
+                f"- {asset.get('asset_id')} | {asset.get('asset_name')} | "
+                f"status {asset.get('status', 'removed')} | archived {asset.get('archived', True)}"
+            )
     return "\n".join(lines)
 
 
@@ -199,12 +214,68 @@ def summarize_policy_check(report):
     return "\n".join(lines)
 
 
+def summarize_dca_report(config):
+    active, paused = split_dca_items(config.get("dca_plan", {}))
+    weekly_active = [item for item in active if item.get("frequency") == "weekly"]
+    monthly_active = [item for item in active if item.get("frequency") == "monthly"]
+    lines = ["定投计划报告", ""]
+    lines.append("active 定投：")
+    if not active:
+        lines.append("- 无")
+    for item in active:
+        lines.append(
+            f"- {item.get('fund_code')} | {item.get('fund_name')} | {item.get('amount')} 元 | "
+            f"{item.get('frequency')} | {dca_frequency_detail(item)} | {item.get('asset_id')}"
+        )
+    lines.append("paused 定投：")
+    if not paused:
+        lines.append("- 无")
+    for item in paused:
+        lines.append(
+            f"- {item.get('fund_code')} | {item.get('fund_name')} | {item.get('amount')} 元 | "
+            f"{item.get('frequency')} | status {item.get('status')} | {item.get('asset_id')}"
+        )
+    lines.append("汇总：")
+    lines.append(f"- 每周 active 定投总额：{sum(float(item.get('amount', 0)) for item in weekly_active):.2f} 元")
+    lines.append(f"- 每月 active 定投总额：{sum(float(item.get('amount', 0)) for item in monthly_active):.2f} 元")
+    lines.append(f"- 暂停定投数量：{len(paused)}")
+    return "\n".join(lines)
+
+
+def split_dca_items(dca_plan):
+    active = []
+    paused = []
+    for frequency, items in (("weekly", dca_plan.get("weekly", [])), ("monthly", dca_plan.get("monthly", []))):
+        for item in items:
+            normalized = {**item, "frequency": frequency, "status": item.get("status", "active")}
+            if is_active_dca(normalized):
+                active.append(normalized)
+            else:
+                paused.append(normalized)
+    return active, paused
+
+
+def dca_frequency_label(item):
+    if item.get("frequency") == "monthly":
+        return f"每月{item.get('day', 1)}日"
+    return "每周四"
+
+
+def dca_frequency_detail(item):
+    if item.get("frequency") == "monthly":
+        return f"day_of_month={item.get('day', 1)}"
+    return f"weekday={item.get('weekday', item.get('weekly_day', 'thu'))}"
+
+
 def current_holdings(config):
-    return [asset for asset in config.get("holdings", []) if asset.get("asset_id") != "CASH"]
+    return [
+        asset for asset in config.get("holdings", [])
+        if asset.get("asset_id") != "CASH" and is_active_holding(asset)
+    ]
 
 
 def summarize_holdings(config):
-    holdings = config.get("holdings", [])
+    holdings = [asset for asset in config.get("holdings", []) if is_active_holding(asset)]
     total_amount = sum(float(asset.get("amount", 0)) for asset in holdings)
     by_role = {}
     for asset in holdings:
@@ -237,10 +308,78 @@ def _category_weight(holdings, category):
     return sum(float(asset.get("weight", 0)) for asset in holdings if asset.get("asset_id") in asset_ids)
 
 
+def is_active_holding(item):
+    return item.get("status", "active") != "removed" and not item.get("archived", False)
+
+
+def is_active_dca(item):
+    return item.get("status", "active") == "active"
+
+
+def _active_holdings_data(holdings_data):
+    active_holdings = []
+    has_removed = False
+    for asset in holdings_data.get("holdings", []):
+        if not is_active_holding(asset):
+            has_removed = True
+            continue
+        active_asset = dict(asset)
+        active_asset["funds"] = [dict(fund) for fund in asset.get("funds", []) if is_active_holding(fund)]
+        if len(active_asset["funds"]) != len(asset.get("funds", [])):
+            has_removed = True
+        active_holdings.append(active_asset)
+    if has_removed:
+        _recalculate_holding_weights(active_holdings)
+    return {**holdings_data, "holdings": active_holdings}
+
+
+def _removed_holdings(holdings_data):
+    removed = []
+    for asset in holdings_data.get("holdings", []):
+        removed_funds = [fund for fund in asset.get("funds", []) if not is_active_holding(fund)]
+        if not is_active_holding(asset) or removed_funds:
+            entry = dict(asset)
+            if removed_funds:
+                entry["funds"] = removed_funds
+            removed.append(entry)
+    return removed
+
+
+def _normalize_dca_plan(dca_plan):
+    normalized = dict(dca_plan)
+    normalized["weekly"] = [{**item, "status": item.get("status", "active")} for item in dca_plan.get("weekly", [])]
+    normalized["monthly"] = [{**item, "status": item.get("status", "active")} for item in dca_plan.get("monthly", [])]
+    return normalized
+
+
+def _active_dca_plan(dca_plan):
+    active = dict(dca_plan)
+    active["weekly"] = [item for item in dca_plan.get("weekly", []) if is_active_dca(item)]
+    active["monthly"] = [item for item in dca_plan.get("monthly", []) if is_active_dca(item)]
+    return active
+
+
+def _recalculate_holding_weights(holdings):
+    for asset in holdings:
+        if asset.get("funds"):
+            asset["amount"] = round(sum(float(fund.get("amount", 0)) for fund in asset.get("funds", []) if is_active_holding(fund)), 2)
+    total = sum(float(asset.get("amount", 0)) for asset in holdings)
+    if total <= 0:
+        return
+    for asset in holdings:
+        asset["weight"] = round(float(asset.get("amount", 0)) / total, 6)
+        for fund in asset.get("funds", []):
+            fund["weight"] = round(float(fund.get("amount", 0)) / total, 6)
+
+
 def _build_allowed_funds(holdings_data, policy, fallback_funds):
     fund_map = {fund["code"]: fund for fund in fallback_funds}
     for asset in holdings_data.get("holdings", []):
+        if not is_active_holding(asset):
+            continue
         for fund in asset.get("funds", []):
+            if not is_active_holding(fund):
+                continue
             fund_map[fund["code"]] = {"code": fund["code"], "name": fund["name"]}
     allowed = policy.get("allowed_fund_codes")
     if allowed:
@@ -256,19 +395,23 @@ def _build_portfolio_config(base, holdings_data, dca_plan, policy, bullet_cash):
     config["dca_frequency"] = "mixed"
     config["dca_weekday"] = dca_plan.get("weekly_day_index", 3)
 
-    holdings = {asset["asset_id"]: asset for asset in holdings_data.get("holdings", [])}
+    holdings = {asset["asset_id"]: asset for asset in holdings_data.get("holdings", []) if is_active_holding(asset)}
     weekly_by_asset = {}
     for item in dca_plan.get("weekly", []):
-        weekly_by_asset.setdefault(item["asset_id"], []).append({**item, "frequency": "weekly", "weekday": dca_plan.get("weekly_day_index", 3)})
+        if is_active_dca(item):
+            weekly_by_asset.setdefault(item["asset_id"], []).append({**item, "frequency": "weekly", "weekday": dca_plan.get("weekly_day_index", 3)})
     monthly_by_asset = {}
     for item in dca_plan.get("monthly", []):
-        monthly_by_asset.setdefault(item["asset_id"], []).append({**item, "frequency": "monthly"})
+        if is_active_dca(item):
+            monthly_by_asset.setdefault(item["asset_id"], []).append({**item, "frequency": "monthly"})
 
     assets = []
     for asset_id in PORTFOLIO_ASSET_ORDER:
-        holding = holdings.get(asset_id, {"asset_id": asset_id, "asset_name": asset_id, "role": "unknown"})
         schedules = [*weekly_by_asset.get(asset_id, []), *monthly_by_asset.get(asset_id, [])]
         weekly_amount = sum(item["amount"] for item in weekly_by_asset.get(asset_id, []))
+        if asset_id not in holdings and not schedules and weekly_amount <= 0:
+            continue
+        holding = holdings.get(asset_id, {"asset_id": asset_id, "asset_name": asset_id, "role": "unknown"})
         representative = REPRESENTATIVE_FUNDS.get(asset_id)
         if not representative:
             continue

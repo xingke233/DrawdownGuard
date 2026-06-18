@@ -1272,9 +1272,9 @@ quant_score =
 
 `committee-report` 会自动读取 `data/quant_signal_report.json`，在一页摘要中显示市场环境，并新增“量化信号”表格。
 
-## V4.6 Fund Watchlist / Candidate Fund Analyzer
+## V5.2 Watchlist / Candidate Fund Analyzer
 
-观察池用于研究用户感兴趣但尚未买入的基金。观察池基金不会进入真实持仓、定投计划或补仓 allow list。
+观察池用于研究用户感兴趣但尚未买入的基金。观察池基金只保存在 `data/watchlist_funds.json`，不会进入真实持仓、定投计划、补仓 allow list 或历史触发记录。
 
 新增文件：
 
@@ -1285,7 +1285,7 @@ data/watchlist_funds.json
 新增命令：
 
 ```bash
-python3 main.py watchlist-add <fund_code> --name "基金名称" --role satellite --reason "关注原因"
+python3 main.py watchlist-add <fund_code> --name "基金名称" --role satellite --reason "关注原因" --notes "备注"
 python3 main.py watchlist-report
 python3 main.py watchlist-analyze <fund_code>
 python3 main.py watchlist-analyze <fund_code> --weekly-dca 20 --start-date 2021-01-01
@@ -1300,6 +1300,7 @@ python3 main.py watchlist-promote <fund_code>
 - 不修改 `data/current_holdings.json`
 - 不修改 `data/dca_plan.json`
 - 不修改 `data/policy_config.json`
+- 不修改 `data/records.json`
 
 `watchlist-analyze` 会输出：
 
@@ -1315,7 +1316,13 @@ python3 main.py watchlist-promote <fund_code>
 
 `watchlist-promote` 第一版只生成手动配置片段，不会自动修改真实持仓或策略配置。
 
-`committee-report` 会读取 `data/watchlist_analysis_report.json`，显示“观察基金”板块。
+`committee-report` 会读取 `data/watchlist_funds.json` 和 `data/watchlist_analysis_report.json`，显示“观察基金”板块；未分析的基金会显示“尚未分析”。
+
+默认 daily 不分析观察池，避免日常 quick 变慢。如需刷新观察池分析：
+
+```bash
+python3 main.py daily --quick --include-watchlist
+```
 
 ## V5.0 Interactive Control Center
 
@@ -1379,3 +1386,126 @@ python3 main.py holding-update 270042 --amount 2200 --dry-run
 - 不修改 `strategy_activation_date`
 - 不修改历史触发记录或 `records.json`
 - 观察基金不会自动进入真实持仓、定投计划或补仓 allow list
+
+## V5.1 Config State Enforcement
+
+配置状态现在会真正进入系统计算链路。
+
+### DCA 状态管理
+
+`data/dca_plan.json` 中每条定投支持：
+
+- `status: active`
+- `status: paused`
+
+缺少 `status` 时默认视为 `active`。
+
+暂停定投：
+
+```bash
+python3 main.py dca-pause 012752
+```
+
+恢复定投：
+
+```bash
+python3 main.py dca-resume 012752
+```
+
+查看定投状态：
+
+```bash
+python3 main.py dca-report
+```
+
+`paused` 定投不会参与：
+
+- `portfolio-backtest`
+- `profile-report` active 定投金额
+- `rebalance-advice` 未来资金流向
+- `committee-report` active 定投表
+
+`committee-report` 和 `dca-report` 会单独显示 paused DCA。
+
+### 移除但保留历史持仓
+
+`holding-remove` 不再物理删除基金，而是标记：
+
+```json
+{
+  "status": "removed",
+  "archived": true
+}
+```
+
+示例：
+
+```bash
+python3 main.py holding-remove 016708 --dry-run
+```
+
+removed / archived 持仓不会参与当前资产总额、权重、回测、再平衡或投委会当前持仓结构。`holdings-report` 会在“历史/已移除持仓”中显示这些记录。
+
+### Watchlist 隔离
+
+`data/watchlist_funds.json` 只用于观察池命令和投委会观察区，不参与真实组合计算、回测、再平衡或补仓检查。
+
+### 配置修改日志
+
+`data/config_change_log.json` 会记录状态变化，例如 `dca-pause`、`dca-resume`、`holding-remove`、`holding-update`、`cash-update`。
+
+## V5.3 Daily Online News Fetcher
+
+Daily Online News Fetcher 用于自动抓取、缓存、筛选和分析与当前组合相关的财经新闻。新闻信号只进入投委会报告，不自动交易，不修改持仓、定投或补仓策略。
+
+新增配置和运行产物：
+
+- `data/news_sources.json`：新闻源配置，支持 `rss` 和简单 `web`。
+- `data/news_cache.json`：新闻缓存和去重结果，运行产物，默认不提交。
+- `data/news_analysis_report.json`：每日新闻分析报告，运行产物。
+
+常用命令：
+
+```bash
+python3 main.py news-sources
+python3 main.py news-source-add --name "示例RSS" --type rss --url "https://example.com/rss.xml" --category market
+python3 main.py news-source-enable "示例RSS"
+python3 main.py news-source-disable "示例RSS"
+python3 main.py news-fetch
+python3 main.py news-analyze
+python3 main.py news-analyze --days 3
+python3 main.py news-report
+python3 main.py news-import --title "美联储释放降息信号，科技股走强" --content "市场预期美联储可能降息，纳斯达克科技股上涨。" --source "manual"
+```
+
+在 daily 中启用新闻：
+
+```bash
+python3 main.py daily --quick --include-news
+```
+
+默认 daily 不抓取新闻，避免日常 quick 受网络波动影响。启用 `--include-news` 后会执行：
+
+1. `news-fetch`
+2. `news-analyze`
+3. `committee-report`
+
+新闻会按关键词映射到资产：
+
+- `NASDAQ100`：纳斯达克、美股、科技股、AI、英伟达、半导体、美联储、降息、加息等。
+- `HSTECH`：恒生科技、港股科技、阿里、腾讯、平台经济、互联网监管等。
+- `GOLD`：黄金、金价、避险、美元、实际利率、地缘冲突、通胀等。
+- `BONDS`：债券、国债、利率、央行、货币政策、信用风险、收益率等。
+- 观察池：从 `watchlist_funds.json` 的基金名称、关注原因、角色和备注中提取关键词。
+
+分析字段包括：
+
+- `news_category`
+- `sentiment`
+- `impact_score`
+- `news_importance_score`
+- `matched_assets`
+- `matched_keywords`
+- `suggested_follow_up`
+
+`committee-report` 会新增“每日新闻分析”板块，一页摘要会显示“新闻风险”。新闻结论只作为投委会辅助判断，不作为买卖指令。

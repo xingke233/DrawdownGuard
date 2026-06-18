@@ -223,6 +223,8 @@ class DailyWorkflowTest(unittest.TestCase):
                 "contribution-report",
                 "quant-signal",
                 "watchlist-analyze",
+                "news-fetch",
+                "news-analyze",
                 "rebalance-advice",
                 "committee-report",
             ],
@@ -241,6 +243,37 @@ class DailyWorkflowTest(unittest.TestCase):
         self.assertTrue(steps[names.index("contribution-report")]["skip"])
         self.assertTrue(steps[names.index("watchlist-analyze")]["skip"])
         self.assertFalse(steps[names.index("quant-signal")].get("skip", False))
+
+    def test_daily_include_watchlist_runs_watchlist_step(self):
+        import main
+
+        steps = main._daily_steps(_daily_args(quick=True, include_watchlist=True))
+        names = [step["name"] for step in steps]
+
+        self.assertIn("watchlist-analyze", names)
+        self.assertFalse(steps[names.index("watchlist-analyze")].get("skip", False))
+
+    def test_daily_include_news_runs_news_steps(self):
+        import main
+
+        steps = main._daily_steps(_daily_args(quick=True, include_news=True))
+        names = [step["name"] for step in steps]
+
+        self.assertIn("news-fetch", names)
+        self.assertIn("news-analyze", names)
+        self.assertFalse(steps[names.index("news-fetch")].get("skip", False))
+        self.assertFalse(steps[names.index("news-analyze")].get("skip", False))
+        self.assertLess(names.index("quant-signal"), names.index("news-fetch"))
+        self.assertLess(names.index("news-analyze"), names.index("rebalance-advice"))
+
+    def test_daily_default_skips_news_steps(self):
+        import main
+
+        steps = main._daily_steps(_daily_args(quick=True))
+        names = [step["name"] for step in steps]
+
+        self.assertTrue(steps[names.index("news-fetch")]["skip"])
+        self.assertTrue(steps[names.index("news-analyze")]["skip"])
 
     def test_skip_quant_skips_step_and_writes_info(self):
         report = run_daily_workflow(
@@ -451,7 +484,7 @@ def _restore_env(previous):
             os.environ[key] = previous[key]
 
 
-def _daily_args(quick=False, skip_quant=False):
+def _daily_args(quick=False, skip_quant=False, include_watchlist=False, include_news=False):
     return SimpleNamespace(
         config="config.yaml",
         nav_file="nav_data.json",
@@ -459,5 +492,6 @@ def _daily_args(quick=False, skip_quant=False):
         quick=quick,
         skip_backtest=False,
         skip_quant=skip_quant,
-        include_watchlist=False,
+        include_watchlist=include_watchlist,
+        include_news=include_news,
     )

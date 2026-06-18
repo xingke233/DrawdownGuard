@@ -1,6 +1,6 @@
 from datetime import date
 
-from .real_config import summarize_holdings
+from .real_config import split_dca_items, summarize_holdings
 
 
 MISSING_TEXT = "暂无数据，请先运行对应命令。"
@@ -27,6 +27,8 @@ def build_committee_report(
     daily_run_report=None,
     quant_signal_report=None,
     watchlist_report=None,
+    watchlist_funds=None,
+    news_report=None,
     plain=False,
 ):
     daily_logs = daily_logs or []
@@ -37,16 +39,20 @@ def build_committee_report(
     daily_run_report = daily_run_report or {}
     quant_signal_report = quant_signal_report or {}
     watchlist_report = watchlist_report or {}
+    watchlist_funds = watchlist_funds or {}
+    news_report = news_report or {}
 
     sections = {
         "account_overview": build_account_overview(config),
         "holdings_structure": build_holdings_structure(config),
+        "dca_plan": build_dca_plan_summary(config),
         "daily_drawdown_check": build_daily_drawdown_check(config, daily_logs),
         "portfolio_backtest_summary": build_portfolio_backtest_summary(portfolio_backtest_report),
         "contribution_analysis": build_contribution_summary(contribution_report),
         "rebalance_advice": build_rebalance_summary(rebalance_advice),
         "quant_signal": build_quant_signal_summary(quant_signal_report),
-        "watchlist": build_watchlist_summary(watchlist_report),
+        "watchlist": build_watchlist_summary(watchlist_report, watchlist_funds),
+        "news_analysis": build_news_summary(news_report),
         "committee_conclusion": build_committee_conclusion(config, rebalance_advice, contribution_report),
         "risk_disclosure": [
             "历史回测不代表未来收益。",
@@ -56,6 +62,7 @@ def build_committee_report(
         "policy_check": build_policy_check_summary(policy_check_report),
     }
     apply_daily_quant_summary(sections, daily_run_report)
+    apply_daily_news_summary(sections, daily_run_report)
     traffic_light_status = build_traffic_light_status(sections)
     one_page_summary = build_one_page_summary(traffic_light_status)
     action_checklist = build_action_checklist(sections)
@@ -116,6 +123,16 @@ def build_holdings_structure(config):
             }
         )
     return holdings
+
+
+def build_dca_plan_summary(config):
+    active, paused = split_dca_items(config.get("dca_plan", {}))
+    return {
+        "active": active,
+        "paused": paused,
+        "weekly_active_total": sum(float(item.get("amount", 0)) for item in active if item.get("frequency") == "weekly"),
+        "monthly_active_total": sum(float(item.get("amount", 0)) for item in active if item.get("frequency") == "monthly"),
+    }
 
 
 def build_daily_drawdown_check(config, daily_logs):
@@ -245,30 +262,95 @@ def build_quant_signal_summary(report):
     }
 
 
-def build_watchlist_summary(report):
-    if not report:
-        return {"status": "missing", "message": MISSING_TEXT, "funds": []}
+def build_watchlist_summary(report, watchlist_funds=None):
+    report = report or {}
+    watchlist_funds = watchlist_funds or {}
+    base_funds = {
+        item.get("fund_code"): item
+        for item in watchlist_funds.get("funds", [])
+        if item.get("fund_code")
+    }
     funds = []
+    analyzed_codes = set()
     for item in report.get("funds", []):
         fund = item.get("fund", {})
         signal = item.get("quant_signal", {})
         fit = item.get("portfolio_fit", {})
+        fund_code = fund.get("fund_code")
+        if fund_code:
+            analyzed_codes.add(fund_code)
         funds.append(
             {
-                "fund_code": fund.get("fund_code"),
+                "fund_code": fund_code,
                 "fund_name": fund.get("fund_name"),
                 "candidate_role": fund.get("candidate_role"),
                 "reason": fund.get("reason"),
                 "quant_score": signal.get("quant_score"),
                 "signal_status": signal.get("signal_status"),
+                "status": fund.get("status", "watching"),
                 "fit_type": fit.get("fit_type"),
+                "candidate_category": fit.get("candidate_category"),
+                "overlap_type": fit.get("overlap_type"),
+                "suggested_action": fit.get("suggested_action"),
+                "reasoning": fit.get("reasoning"),
                 "message": fit.get("message"),
             }
         )
+    for fund_code, fund in sorted(base_funds.items(), key=lambda pair: pair[1].get("created_at", "")):
+        if fund_code in analyzed_codes:
+            continue
+        funds.append(
+            {
+                "fund_code": fund_code,
+                "fund_name": fund.get("fund_name"),
+                "candidate_role": fund.get("candidate_role"),
+                "reason": fund.get("reason"),
+                "quant_score": None,
+                "signal_status": "尚未分析",
+                "status": fund.get("status", "watching"),
+                "fit_type": None,
+                "candidate_category": None,
+                "overlap_type": None,
+                "suggested_action": "尚未分析",
+                "reasoning": "尚未分析",
+                "message": "尚未分析",
+            }
+        )
+    if not funds and not report:
+        return {"status": "missing", "message": MISSING_TEXT, "funds": []}
     return {
         "status": "available",
         "funds": funds,
         "warnings": report.get("warnings", []),
+    }
+
+
+def build_news_summary(report):
+    if not report:
+        return {"status": "missing", "message": "暂无相关重要新闻。", "items": []}
+    summary = report.get("portfolio_news_summary", {})
+    items = []
+    for item in report.get("items", [])[:10]:
+        items.append(
+            {
+                "title": item.get("title"),
+                "source": item.get("source"),
+                "matched_assets": item.get("matched_assets", []),
+                "sentiment": item.get("sentiment"),
+                "impact_score": item.get("impact_score"),
+                "news_importance_score": item.get("news_importance_score"),
+                "summary": item.get("summary"),
+            }
+        )
+    return {
+        "status": "available",
+        "overall_news_tone": summary.get("overall_news_tone"),
+        "risk_alert_level": summary.get("risk_alert_level"),
+        "relevant_news_count": summary.get("relevant_news_count", 0),
+        "high_impact_news_count": summary.get("high_impact_news_count", 0),
+        "most_affected_assets": summary.get("most_affected_assets", []),
+        "key_watch_items": summary.get("key_watch_items", []),
+        "items": items,
     }
 
 
@@ -286,6 +368,25 @@ def apply_daily_quant_summary(sections, daily_run_report):
         section["average_quant_score"] = conclusion.get("average_quant_score")
     if conclusion.get("core_asset_score") is not None:
         section["core_asset_score"] = conclusion.get("core_asset_score")
+
+
+def apply_daily_news_summary(sections, daily_run_report):
+    conclusion = (daily_run_report or {}).get("today_conclusion", {})
+    risk = conclusion.get("news_risk_alert_level") or daily_run_report.get("news_risk_alert_level")
+    tone = conclusion.get("news_overall_tone") or daily_run_report.get("news_overall_tone")
+    count = conclusion.get("news_relevant_count") or daily_run_report.get("news_relevant_count")
+    if not risk and not tone:
+        return
+    section = sections.setdefault("news_analysis", {"status": "missing", "message": "暂无相关重要新闻。", "items": []})
+    if section.get("status") == "missing":
+        section["status"] = "available"
+        section["message"] = None
+    if risk:
+        section["risk_alert_level"] = risk
+    if tone:
+        section["overall_news_tone"] = tone
+    if count is not None:
+        section["relevant_news_count"] = count
 
 
 def build_policy_check_summary(report):
@@ -308,6 +409,8 @@ def build_committee_conclusion(config, rebalance_advice, contribution_report):
         "债券不新增或少新增，未来现金流向 CORE 倾斜。",
         "黄金维持月定投。",
         "红利低波维持观察，并使用 accumulated_nav 口径。",
+        "今日新闻不改变原有补仓规则。",
+        "高影响新闻进入观察清单，新闻信号仅辅助判断，不作为买卖指令。",
     ]
     if not contribution_report:
         conclusions.append("资产贡献分析暂无数据，请先运行 contribution-report。")
@@ -344,6 +447,7 @@ def build_traffic_light_status(sections):
         ),
         "rebalance": _rebalance_traffic(rebalance),
         "quant": _quant_traffic(sections.get("quant_signal", {})),
+        "news": _news_traffic(sections.get("news_analysis", {})),
     }
 
 
@@ -356,6 +460,7 @@ def build_one_page_summary(traffic_light_status):
         ("defensive", "防守资产"),
         ("rebalance", "再平衡"),
         ("quant", "市场环境"),
+        ("news", "新闻风险"),
     ]
     return [
         {
@@ -436,11 +541,13 @@ def render_committee_markdown(report, plain=False):
     lines.extend(render_daily_messages(report.get("daily_messages", {})))
     lines.extend(render_account_overview(sections.get("account_overview", {})))
     lines.extend(render_holdings_structure(sections.get("holdings_structure", [])))
+    lines.extend(render_dca_plan(sections.get("dca_plan", {})))
     lines.extend(render_daily_drawdown_check(sections.get("daily_drawdown_check", {})))
     lines.extend(render_portfolio_backtest(sections.get("portfolio_backtest_summary", {})))
     lines.extend(render_contribution(sections.get("contribution_analysis", {})))
     lines.extend(render_rebalance(sections.get("rebalance_advice", {})))
     lines.extend(render_quant_signal(sections.get("quant_signal", {})))
+    lines.extend(render_news_analysis(sections.get("news_analysis", {})))
     lines.extend(render_watchlist(sections.get("watchlist", {})))
     lines.extend(render_conclusion(sections.get("committee_conclusion", [])))
     lines.extend(render_risk(sections.get("risk_disclosure", [])))
@@ -458,11 +565,13 @@ def render_committee_plain_markdown(report):
     ]
     lines.extend(render_account_overview(sections.get("account_overview", {})))
     lines.extend(render_holdings_structure(sections.get("holdings_structure", [])))
+    lines.extend(render_dca_plan(sections.get("dca_plan", {})))
     lines.extend(render_daily_drawdown_check(sections.get("daily_drawdown_check", {}), plain=True))
     lines.extend(render_portfolio_backtest(sections.get("portfolio_backtest_summary", {})))
     lines.extend(render_contribution(sections.get("contribution_analysis", {})))
     lines.extend(render_rebalance(sections.get("rebalance_advice", {})))
     lines.extend(render_quant_signal(sections.get("quant_signal", {})))
+    lines.extend(render_news_analysis(sections.get("news_analysis", {})))
     lines.extend(render_watchlist(sections.get("watchlist", {})))
     lines.extend(render_conclusion(sections.get("committee_conclusion", [])))
     lines.extend(render_risk(sections.get("risk_disclosure", [])))
@@ -544,8 +653,22 @@ def render_holdings_structure(section):
     return lines
 
 
+def render_dca_plan(section):
+    lines = ["## 三、定投状态", ""]
+    lines.append(f"- 每周 active 定投总额：{_money(section.get('weekly_active_total', 0))}")
+    lines.append(f"- 每月 active 定投总额：{_money(section.get('monthly_active_total', 0))}")
+    lines.append(f"- paused 定投数量：{len(section.get('paused', []))}")
+    lines.extend(["", "| 状态 | 基金 | 金额 | 频率 | 资产 |", "| --- | --- | ---: | --- | --- |"])
+    for item in section.get("active", []):
+        lines.append(f"| active | {item.get('fund_code')} {item.get('fund_name')} | {_money(item.get('amount'))} | {item.get('frequency')} | {item.get('asset_id')} |")
+    for item in section.get("paused", []):
+        lines.append(f"| 已暂停 | {item.get('fund_code')} {item.get('fund_name')} | {_money(item.get('amount'))} | {item.get('frequency')} | {item.get('asset_id')} |")
+    lines.append("")
+    return lines
+
+
 def render_daily_drawdown_check(section, plain=False):
-    lines = ["## 三、今日补仓检查", ""]
+    lines = ["## 四、今日补仓检查", ""]
     lines.append(f"- 允许补仓资产：{', '.join(section.get('allowed_drawdown_assets', [])) or '无'}")
     if section.get("status") == "missing":
         lines.append(f"- {section.get('message')}")
@@ -562,7 +685,7 @@ def render_daily_drawdown_check(section, plain=False):
 
 
 def render_portfolio_backtest(section):
-    lines = ["## 四、组合回测摘要", ""]
+    lines = ["## 五、组合回测摘要", ""]
     if section.get("status") == "missing":
         lines.append(f"- {section.get('message')}")
         lines.append("")
@@ -582,7 +705,7 @@ def render_portfolio_backtest(section):
 
 
 def render_contribution(section):
-    lines = ["## 五、资产贡献分析", ""]
+    lines = ["## 六、资产贡献分析", ""]
     if section.get("status") == "missing":
         lines.append(f"- {section.get('message')}")
         lines.append("")
@@ -610,7 +733,7 @@ def render_contribution(section):
 
 
 def render_rebalance(section):
-    lines = ["## 六、再平衡建议", ""]
+    lines = ["## 七、再平衡建议", ""]
     if section.get("status") == "missing":
         lines.append(f"- {section.get('message')}")
         lines.append("")
@@ -641,7 +764,7 @@ def render_rebalance(section):
 
 
 def render_quant_signal(section):
-    lines = ["## 七、量化信号", ""]
+    lines = ["## 八、量化信号", ""]
     if section.get("status") == "missing":
         lines.append(f"- {section.get('message')}")
         lines.append("")
@@ -665,29 +788,61 @@ def render_quant_signal(section):
     return lines
 
 
+def render_news_analysis(section):
+    lines = ["## 九、每日新闻分析", ""]
+    if section.get("status") == "missing":
+        lines.append(f"- {section.get('message', '暂无相关重要新闻。')}")
+        lines.append("")
+        return lines
+    lines.extend(
+        [
+            f"- 新闻情绪：{section.get('overall_news_tone', 'neutral')}",
+            f"- 新闻风险：{section.get('risk_alert_level', 'low')}",
+            f"- 相关新闻数量：{section.get('relevant_news_count', 0)}",
+            "",
+        ]
+    )
+    if not section.get("items"):
+        lines.append("- 暂无相关重要新闻。")
+        lines.append("")
+        return lines
+    lines.extend(["| 新闻 | 来源 | 影响资产 | 情绪 | 分数 | 重要性 | 结论 |", "| --- | --- | --- | --- | ---: | ---: | --- |"])
+    for item in section.get("items", []):
+        lines.append(
+            f"| {short_text(item.get('title'), 34)} | {item.get('source')} | "
+            f"{', '.join(item.get('matched_assets', [])) or '无'} | {item.get('sentiment')} | "
+            f"{item.get('impact_score')} | {item.get('news_importance_score')} | "
+            f"{short_text(item.get('summary'), 48)} |"
+        )
+    lines.append("")
+    return lines
+
+
 def render_watchlist(section):
-    lines = ["## 八、观察基金", ""]
+    lines = ["## 十、观察基金", ""]
     if section.get("status") == "missing":
         lines.append(f"- {section.get('message')}")
         lines.append("")
         return lines
     if not section.get("funds"):
-        lines.append("- 当前观察池为空。")
+        lines.append("- 当前无观察基金。")
         lines.append("")
         return lines
-    lines.extend(["| 基金 | 角色 | 分数 | 状态 | 组合适配 | 结论 |", "| --- | --- | ---: | --- | --- | --- |"])
+    lines.extend(["| 基金 | 角色 | Category | Overlap | 建议 | Reasoning |", "| --- | --- | --- | --- | --- | --- |"])
     for item in section.get("funds", []):
+        advice = item.get("suggested_action") or item.get("message") or "尚未分析"
+        reasoning = item.get("reasoning") or item.get("message") or "尚未分析"
         lines.append(
             f"| {item.get('fund_code')} {item.get('fund_name')} | {item.get('candidate_role')} | "
-            f"{_score(item.get('quant_score'))} | {item.get('signal_status', 'N/A')} | "
-            f"{item.get('fit_type', 'N/A')} | {item.get('message', '')} |"
+            f"{item.get('candidate_category') or 'N/A'} | {item.get('overlap_type') or 'N/A'} | "
+            f"{advice} | {short_text(reasoning, 48)} |"
         )
     lines.append("")
     return lines
 
 
 def render_conclusion(section):
-    lines = ["## 九、投委会结论", ""]
+    lines = ["## 十一、投委会结论", ""]
     for item in section:
         lines.append(f"- {item}")
     lines.append("")
@@ -695,7 +850,7 @@ def render_conclusion(section):
 
 
 def render_risk(section):
-    lines = ["## 十、风险提示", ""]
+    lines = ["## 十二、风险提示", ""]
     for item in section:
         lines.append(f"- {item}")
     lines.append("")
@@ -718,6 +873,15 @@ def _score(value):
     if value is None:
         return "N/A"
     return f"{float(value):.0f}"
+
+
+def short_text(value, max_length=48):
+    if not value:
+        return "N/A"
+    text = str(value)
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 1] + "..."
 
 
 def _asset_ref(asset):
@@ -802,6 +966,17 @@ def _quant_traffic(section):
     if regime == "defensive":
         return {"color": "yellow", "status": regime, "conclusion": "市场偏防守，维持风险控制"}
     return {"color": "yellow", "status": regime, "conclusion": "市场环境中性，继续观察"}
+
+
+def _news_traffic(section):
+    if section.get("status") == "missing":
+        return {"color": "green", "status": "暂无数据", "conclusion": "暂无相关重要新闻"}
+    risk = section.get("risk_alert_level") or "low"
+    if risk == "high":
+        return {"color": "red", "status": risk, "conclusion": "存在高影响新闻，纳入观察清单"}
+    if risk == "medium":
+        return {"color": "yellow", "status": risk, "conclusion": "新闻风险中等，继续观察"}
+    return {"color": "green", "status": risk, "conclusion": "新闻风险低"}
 
 
 def _traffic_label(color, status):

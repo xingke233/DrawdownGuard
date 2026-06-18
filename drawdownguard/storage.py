@@ -120,6 +120,9 @@ class Storage:
         self._save_json("watchlist_funds.json", report)
 
     def load_watchlist_funds(self):
+        path = self.data_dir / "watchlist_funds.json"
+        if not path.exists():
+            self._save_json("watchlist_funds.json", {"funds": []})
         return self._load_json("watchlist_funds.json", {"funds": []})
 
     def save_watchlist_analysis_report(self, report):
@@ -130,6 +133,24 @@ class Storage:
 
     def save_watchlist_fund_analysis(self, fund_code, report):
         self._save_json(f"watchlist_analysis_{fund_code}.json", report)
+
+    def save_news_sources(self, report):
+        self._save_json("news_sources.json", report)
+
+    def load_news_sources(self):
+        return self._load_json("news_sources.json", {"sources": []})
+
+    def save_news_cache(self, report):
+        self._save_json("news_cache.json", report)
+
+    def load_news_cache(self):
+        return self._load_json("news_cache.json", {"items": [], "fetch_status": {}})
+
+    def save_news_analysis_report(self, report):
+        self._save_json("news_analysis_report.json", report)
+
+    def load_news_analysis_report(self):
+        return self._load_json("news_analysis_report.json", {})
 
     def save_daily_run_report(self, report):
         self._save_json("daily_run_report.json", report)

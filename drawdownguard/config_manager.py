@@ -98,17 +98,20 @@ class ConfigManager:
         if not before:
             raise ValueError(f"未找到持仓基金：{fund_code}")
         for asset in updated.get("holdings", []):
-            asset["funds"] = [fund for fund in asset.get("funds", []) if fund.get("code") != fund_code]
-        updated["holdings"] = [
-            asset for asset in updated.get("holdings", [])
-            if asset.get("asset_id") == "CASH" or asset.get("funds") or float(asset.get("amount", 0)) > 0
-        ]
+            for fund in asset.get("funds", []):
+                if fund.get("code") == fund_code:
+                    fund["status"] = "removed"
+                    fund["archived"] = True
+            active_funds = [fund for fund in asset.get("funds", []) if self._is_active(fund)]
+            if asset.get("asset_id") != "CASH" and not active_funds:
+                asset["status"] = "removed"
+                asset["archived"] = True
         self._refresh_asset_amounts_and_weights(updated)
         return self._commit(
             "holding-remove",
             fund_code,
-            before,
-            None,
+            {"status": before.get("status", "active"), "archived": before.get("archived", False), "amount": before.get("amount")},
+            {"status": "removed", "archived": True},
             {"current_holdings.json": updated},
             dry_run=dry_run,
         )
@@ -169,8 +172,9 @@ class ConfigManager:
             raise ValueError(f"未找到定投计划：{fund_code}")
         before = item.get("status", "active")
         item["status"] = status
+        operation = "dca-pause" if status == "paused" else "dca-resume"
         return self._commit(
-            f"dca-{status}",
+            operation,
             fund_code,
             {"status": before},
             {"status": status},
@@ -284,11 +288,15 @@ class ConfigManager:
     def _refresh_asset_amounts_and_weights(self, holdings):
         for asset in holdings.get("holdings", []):
             if asset.get("funds"):
-                asset["amount"] = round(sum(float(fund.get("amount", 0)) for fund in asset.get("funds", [])), 2)
-        total = sum(float(asset.get("amount", 0)) for asset in holdings.get("holdings", []))
+                asset["amount"] = round(sum(float(fund.get("amount", 0)) for fund in asset.get("funds", []) if self._is_active(fund)), 2)
+        total = sum(float(asset.get("amount", 0)) for asset in holdings.get("holdings", []) if self._is_active(asset))
         if total <= 0:
             return
         for asset in holdings.get("holdings", []):
-            asset["weight"] = round(float(asset.get("amount", 0)) / total, 6)
+            asset["weight"] = round(float(asset.get("amount", 0)) / total, 6) if self._is_active(asset) else 0
             for fund in asset.get("funds", []):
-                fund["weight"] = round(float(fund.get("amount", 0)) / total, 6)
+                fund["weight"] = round(float(fund.get("amount", 0)) / total, 6) if self._is_active(fund) else 0
+
+    @staticmethod
+    def _is_active(item):
+        return item.get("status", "active") != "removed" and not item.get("archived", False)

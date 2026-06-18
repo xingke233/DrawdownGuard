@@ -1,4 +1,4 @@
-from .real_config import PROFILE_ASSET_CATEGORIES, summarize_holdings
+from .real_config import PROFILE_ASSET_CATEGORIES, split_dca_items, summarize_holdings
 
 
 DEFAULT_TARGET_ALLOCATION = {
@@ -188,8 +188,9 @@ def asset_rule(asset, category, contribution):
 
 
 def build_dca_review(config):
-    weekly = config.get("dca_plan", {}).get("weekly", [])
-    monthly = config.get("dca_plan", {}).get("monthly", [])
+    active, paused = split_dca_items(config.get("dca_plan", {}))
+    weekly = [item for item in active if item.get("frequency") == "weekly"]
+    monthly = [item for item in active if item.get("frequency") == "monthly"]
     weekly_total = sum(float(item.get("amount", 0)) for item in weekly)
     monthly_total = sum(float(item.get("amount", 0)) for item in monthly)
     by_asset = {}
@@ -202,6 +203,7 @@ def build_dca_review(config):
     return {
         "weekly_total": weekly_total,
         "monthly_total": monthly_total,
+        "paused_count": len(paused),
         "by_asset": by_asset,
         "assessment": [
             "保留当前定投计划。",

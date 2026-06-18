@@ -545,7 +545,7 @@ class PortfolioBacktester:
     def _build_dca_schedules(self, asset):
         schedules = asset.get("dca_schedules") or []
         if schedules:
-            return [dict(item) for item in schedules]
+            return [dict(item) for item in schedules if item.get("status", "active") == "active"]
         weekly_amount = int(asset.get("weekly_dca_amount", 0))
         if weekly_amount <= 0:
             return []

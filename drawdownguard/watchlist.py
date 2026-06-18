@@ -6,10 +6,11 @@ from .quant_signal import build_asset_signal, calculate_quant_metrics, max_drawd
 DEFAULT_WATCHLIST = {"funds": []}
 
 
-def add_watchlist_fund(watchlist, fund_code, fund_name, role="unknown", reason="", nav_mode="unit_nav"):
+def add_watchlist_fund(watchlist, fund_code, fund_name, role="unknown", reason="", nav_mode="unit_nav", notes=""):
     funds = list(watchlist.get("funds", []))
-    if any(item.get("fund_code") == fund_code for item in funds):
-        raise ValueError(f"观察池已存在基金：{fund_code}")
+    existing = next((item for item in funds if item.get("fund_code") == fund_code), None)
+    if existing:
+        return {"funds": funds}, {**existing, "already_exists": True}
     item = {
         "fund_code": fund_code,
         "fund_name": fund_name,
@@ -20,6 +21,7 @@ def add_watchlist_fund(watchlist, fund_code, fund_name, role="unknown", reason="
         "allow_drawdown_buy": False,
         "allow_dca": False,
         "created_at": date.today().isoformat(),
+        "notes": notes,
     }
     funds.append(item)
     return {"funds": funds}, item
@@ -39,15 +41,16 @@ def find_watchlist_fund(watchlist, fund_code):
 
 def summarize_watchlist(watchlist):
     lines = ["基金观察池", ""]
-    funds = watchlist.get("funds", [])
+    funds = sorted(watchlist.get("funds", []), key=lambda item: item.get("created_at", ""))
     if not funds:
-        lines.append("暂无观察基金。")
+        lines.append("当前没有观察基金。")
         return "\n".join(lines)
     for item in funds:
         lines.append(
             f"- {item.get('fund_code')} | {item.get('fund_name')} | role {item.get('candidate_role')} | "
             f"status {item.get('status')} | allow_dca {item.get('allow_dca')} | "
-            f"allow_drawdown_buy {item.get('allow_drawdown_buy')} | reason {item.get('reason')}"
+            f"allow_drawdown_buy {item.get('allow_drawdown_buy')} | nav_mode {item.get('nav_mode', 'unit_nav')} | "
+            f"created_at {item.get('created_at')} | reason {item.get('reason')} | notes {item.get('notes', '')}"
         )
     return "\n".join(lines)
 
@@ -75,7 +78,7 @@ def analyze_watchlist_fund(config, provider, watchlist, fund_code, weekly_dca=20
         warnings=nav_data.get("warnings", []),
     )
     dca = simulate_candidate_dca(history, weekly_dca=weekly_dca, start_date=start_date)
-    relationship = analyze_portfolio_fit(config, item)
+    relationship = analyze_portfolio_fit(config, item, signal, dca)
     report = {
         "generated_at": date.today().isoformat(),
         "fund": item,
@@ -93,6 +96,8 @@ def analyze_all_watchlist(config, provider, watchlist, weekly_dca=20, start_date
     reports = []
     warnings = []
     for item in watchlist.get("funds", []):
+        if item.get("status", "watching") != "watching":
+            continue
         try:
             report = analyze_watchlist_fund(
                 config,
@@ -115,6 +120,7 @@ def analyze_all_watchlist(config, provider, watchlist, weekly_dca=20, start_date
     return {
         "generated_at": date.today().isoformat(),
         "funds": reports,
+        "summary_funds": [compact_watchlist_analysis(item) for item in reports],
         "warnings": warnings,
     }
 
@@ -195,9 +201,13 @@ def build_data_check(history, nav_data):
     }
 
 
-def analyze_portfolio_fit(config, item):
+def analyze_portfolio_fit(config, item, signal=None, dca=None):
     role = item.get("candidate_role", "unknown")
     fund_code = item.get("fund_code")
+    signal = signal or {}
+    dca = dca or {}
+    category = classify_candidate_category(item)
+    available_assets = {asset.get("asset_id") for asset in config.get("holdings", [])}
     existing_codes = {
         fund.get("code")
         for asset in config.get("holdings", [])
@@ -205,29 +215,147 @@ def analyze_portfolio_fit(config, item):
     }
     if fund_code in existing_codes:
         return {
-            "fit_type": "重复资产",
+            "candidate_category": category,
+            "possible_overlap_assets": ["current_holdings"],
+            "diversification_effect": "duplicate",
+            "overlap_type": "exact_overlap",
+            "risk_level": "existing",
+            "suggested_action": "consider_replace_existing",
+            "reasoning": "该基金代码已存在于真实持仓中，属于精确重复，不应通过观察池再次新增。",
+            "confidence": "high",
             "is_duplicate": True,
+            "fit_type": "重复资产",
             "message": "该基金已存在于真实持仓中，不应通过观察池重复新增。",
         }
-    if role == "core":
-        fit_type = "核心增强"
-    elif role in ("satellite", "factor"):
-        fit_type = "卫星机会"
-    elif role == "hedge":
-        fit_type = "防守资产"
-    elif role == "theme":
-        fit_type = "高风险主题"
-    else:
-        fit_type = "待分类"
-    duplicate_roles = {
-        asset.get("role")
-        for asset in config.get("holdings", [])
-        if str(asset.get("role", "")).startswith(role)
+    possible_overlap, overlap_type, fit_type, base_reasoning = classify_overlap(category, role, available_assets, item)
+    quant_score = signal.get("quant_score")
+    drawdown = signal.get("drawdown_from_250d_high")
+    warning_text = " ".join(signal.get("warnings") or [])
+    risk_level = "medium"
+    suggested_action = "keep_watching"
+    confidence = "medium" if category != "unknown" else "low"
+    reasoning = base_reasoning
+    if signal.get("status") == "skipped":
+        suggested_action = "data_insufficient"
+        risk_level = "unknown"
+        overlap_type = "insufficient_history"
+        reasoning = "净值数据缺失，无法判断候选基金的长期有效性。"
+        confidence = "high"
+    elif "净值数据不足250条" in warning_text:
+        suggested_action = "need_more_history"
+        risk_level = "unknown"
+        overlap_type = "insufficient_history"
+        reasoning = "历史数据不足250条，不能直接判断长期有效性。"
+        confidence = "high"
+    elif overlap_type == "exact_overlap":
+        suggested_action = "consider_replace_existing"
+        risk_level = "existing"
+        reasoning = base_reasoning
+        confidence = "high"
+    elif category == "commodity_cycle":
+        risk_level = "high" if (drawdown is not None and drawdown <= -0.2) or "high_volatility" in signal.get("tags", []) else "medium"
+        suggested_action = "keep_watching"
+        reasoning = "与黄金同属贵金属大类但风险结构不同，白银等商品周期资产波动和回撤通常更高。"
+    elif category == "high_risk_tech_theme":
+        risk_level = "high_risk_theme"
+        suggested_action = "consider_small_position" if quant_score is not None and quant_score >= 70 and drawdown is not None and drawdown > -0.2 else "keep_watching"
+        reasoning = "科技成长暴露已经存在，趋势较强时也应控制仓位；主题拥挤，不建议直接新增大仓位。"
+    elif role in ("theme", "satellite") and ((drawdown is not None and drawdown <= -0.2) or "high_volatility" in signal.get("tags", [])):
+        risk_level = "high_risk_theme"
+        suggested_action = "keep_watching"
+        overlap_type = overlap_type if overlap_type != "none" else "none"
+        reasoning = "候选基金波动或回撤较高，适合继续观察，不建议直接加入核心。"
+    elif quant_score is not None and quant_score < 30 and drawdown is not None and drawdown <= -0.15:
+        risk_level = "high"
+        suggested_action = "reject"
+        reasoning = "量化分数较低且回撤较深，暂不适合新增。"
+    elif quant_score is not None and quant_score >= 60 and not possible_overlap:
+        risk_level = "medium"
+        suggested_action = "consider_small_position"
+        reasoning = "候选基金量化状态较好，且提供当前组合较少的风险暴露，可考虑小仓位观察。"
+    message = reasoning or "可继续观察，暂不进入真实持仓或定投。"
+    return {
+        "candidate_category": category,
+        "possible_overlap_assets": sorted(set(possible_overlap)),
+        "diversification_effect": diversification_effect_from_overlap(overlap_type),
+        "overlap_type": overlap_type,
+        "risk_level": risk_level,
+        "suggested_action": suggested_action,
+        "reasoning": reasoning,
+        "confidence": confidence,
+        "fit_type": fit_type,
+        "is_duplicate": overlap_type == "exact_overlap",
+        "message": message,
     }
-    message = "可继续观察，暂不进入真实持仓或定投。"
-    if duplicate_roles:
-        message = "可能与现有资产重复，不建议直接新增，除非替换原有资产。"
-    return {"fit_type": fit_type, "is_duplicate": bool(duplicate_roles), "message": message}
+
+
+def classify_candidate_category(item):
+    text = f"{item.get('fund_name', '')} {item.get('reason', '')} {item.get('candidate_role', '')}".lower()
+    keyword_groups = [
+        ("high_risk_tech_theme", ["cpo", "半导体", "ai", "算力", "科技", "人工智能", "芯片", "先进制造"]),
+        ("commodity_cycle", ["白银", "有色", "金属", "商品", "贵金属"]),
+        ("infrastructure_or_utility", ["电网", "公用事业", "电力", "基建"]),
+        ("value_factor", ["红利", "低波", "价值"]),
+        ("index_core_or_broad_index", ["纳指", "纳斯达克", "标普", "沪深300", "中证a500", "中证 A500".lower()]),
+    ]
+    for category, keywords in keyword_groups:
+        if any(keyword in text for keyword in keywords):
+            return category
+    role = item.get("candidate_role")
+    if role == "hedge":
+        return "hedge_candidate"
+    if role == "bond":
+        return "bond_candidate"
+    if role == "active":
+        return "active_fund_candidate"
+    return "unknown"
+
+
+def classify_overlap(category, role, available_assets, item=None):
+    item = item or {}
+    if category == "high_risk_tech_theme":
+        overlaps = [asset for asset in ["NASDAQ100", "HSTECH", "ACTIVE_ADVANCED_MANUFACTURING"] if asset in available_assets]
+        return overlaps, "broad_style_overlap" if overlaps else "none", "高风险科技主题", "科技成长主题与现有成长资产存在风格重叠，但不等于精确重复。"
+    if category == "commodity_cycle":
+        overlaps = ["GOLD"] if "GOLD" in available_assets else []
+        return overlaps, "broad_commodity_overlap" if overlaps else "none", "商品周期", "商品周期资产提供周期暴露，需要与黄金区分评估。"
+    if category == "infrastructure_or_utility":
+        return [], "none", "公用事业/基础设施", "可能提供当前组合较少的防御和基础设施暴露。"
+    if category == "value_factor":
+        overlaps = ["DIVIDEND_LOW_VOL"] if "DIVIDEND_LOW_VOL" in available_assets else []
+        return overlaps, "broad_style_overlap" if overlaps else "none", "价值因子", "可能与红利低波等价值因子资产存在风格重叠。"
+    if category == "index_core_or_broad_index":
+        text = f"{item.get('fund_name', '')} {item.get('reason', '')}".lower()
+        if ("纳指" in text or "纳斯达克" in text) and "NASDAQ100" in available_assets:
+            return ["NASDAQ100"], "exact_overlap", "核心或宽基指数", "纳指候选与现有 NASDAQ100 核心资产跟踪方向高度一致，属于精确重叠，应优先考虑替换而非新增。"
+        overlaps = []
+        if "NASDAQ100" in available_assets:
+            overlaps.append("NASDAQ100")
+        overlap_type = "broad_style_overlap" if overlaps else "none"
+        return overlaps, overlap_type, "核心或宽基指数", "宽基或核心指数候选需要与现有核心资产比较后再决定是否替换或小仓位配置。"
+    if role == "core" and "NASDAQ100" in available_assets:
+        return ["NASDAQ100"], "broad_style_overlap", "核心增强", "核心候选与现有核心成长资产存在大类风格重叠。"
+    if role == "factor":
+        overlaps = [asset for asset in ["CASHFLOW", "DIVIDEND_LOW_VOL"] if asset in available_assets]
+        return overlaps, "broad_style_overlap" if overlaps else "none", "因子候选", "因子候选需要与现有质量、价值因子资产比较。"
+    if role == "hedge":
+        overlaps = ["GOLD"] if "GOLD" in available_assets else []
+        return overlaps, "broad_commodity_overlap" if overlaps else "none", "防守资产", "对冲候选需要与现有黄金或防守资产比较。"
+    if role == "theme":
+        return [], "none", "主题候选", "主题候选需要先观察波动和回撤。"
+    if role == "satellite":
+        return [], "none", "卫星机会", "暂无明确重叠资产，可继续观察是否提供新暴露。"
+    return [], "none", "待分类", "候选基金信息不足，暂按观察处理。"
+
+
+def diversification_effect_from_overlap(overlap_type):
+    if overlap_type == "exact_overlap":
+        return "duplicate"
+    if overlap_type in ("broad_style_overlap", "broad_commodity_overlap"):
+        return overlap_type
+    if overlap_type == "insufficient_history":
+        return "unknown"
+    return "new_diversifier"
 
 
 def promote_watchlist_fund(watchlist, fund_code):
@@ -264,6 +392,30 @@ def promote_watchlist_fund(watchlist, fund_code):
                 "如需补仓，必须手动更新 policy_config.json allow list；默认不允许。",
             ],
         },
+        "holding_add_command": (
+            f"python3 main.py holding-add {item.get('fund_code')} --name \"{item.get('fund_name')}\" "
+            f"--asset-id WATCH_{item.get('fund_code')} --role {item.get('candidate_role', 'unknown')} --amount <实际金额>"
+        ),
+        "dca_add_command": (
+            f"python3 main.py dca-add {item.get('fund_code')} --amount 20 --frequency weekly --weekday thu"
+        ),
+    }
+
+
+def compact_watchlist_analysis(report):
+    fund = report.get("fund", {})
+    signal = report.get("quant_signal", {})
+    fit = report.get("portfolio_fit", {})
+    return {
+        "fund_code": fund.get("fund_code"),
+        "fund_name": fund.get("fund_name"),
+        "candidate_role": fund.get("candidate_role"),
+        "quant_score": signal.get("quant_score"),
+        "signal_status": signal.get("signal_status"),
+        "candidate_category": fit.get("candidate_category"),
+        "overlap_type": fit.get("overlap_type"),
+        "suggested_action": fit.get("suggested_action"),
+        "summary": fit.get("reasoning") or fit.get("message") or signal.get("human_readable_summary"),
     }
 
 
@@ -304,7 +456,14 @@ def summarize_watchlist_analysis(report):
         f"- 简化夏普：{_fmt_num(dca.get('sharpe_like_ratio'))}",
         "",
         "组合适配：",
-        f"- 类型：{fit.get('fit_type')}",
+        f"- candidate_category：{fit.get('candidate_category')}",
+        f"- overlap_type：{fit.get('overlap_type')}",
+        f"- possible_overlap_assets：{', '.join(fit.get('possible_overlap_assets', [])) or '无'}",
+        f"- diversification_effect：{fit.get('diversification_effect')}",
+        f"- risk_level：{fit.get('risk_level')}",
+        f"- suggested_action：{fit.get('suggested_action')}",
+        f"- confidence：{fit.get('confidence')}",
+        f"- reasoning：{fit.get('reasoning')}",
         f"- 结论：{fit.get('message')}",
     ]
     if report.get("warnings"):

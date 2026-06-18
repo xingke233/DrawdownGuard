@@ -40,6 +40,16 @@ from drawdownguard.email_notifier import send_daily_email
 from drawdownguard.fund_check import run_fund_check, summarize_fund_check_report
 from drawdownguard.interactive_control import run_interactive_control
 from drawdownguard.nav_cache import NavCache
+from drawdownguard.news_intelligence import (
+    add_news_source,
+    analyze_news,
+    ensure_news_sources,
+    fetch_news_from_sources,
+    import_news,
+    set_news_source_enabled,
+    summarize_news_report,
+    summarize_news_sources,
+)
 from drawdownguard.notifier import format_daily_logs, format_report, format_transactions
 from drawdownguard.portfolio_constraint_optimizer import (
     default_optimizer_workers,
@@ -57,6 +67,7 @@ from drawdownguard.portfolio_strategy import (
 from drawdownguard.quant_signal import run_quant_signal, summarize_quant_signal_report
 from drawdownguard.real_config import (
     run_policy_checks,
+    summarize_dca_report,
     summarize_holdings_report,
     summarize_policy_check,
     summarize_profile,
@@ -78,6 +89,7 @@ from drawdownguard.watchlist import (
     add_watchlist_fund,
     analyze_all_watchlist,
     analyze_watchlist_fund,
+    compact_watchlist_analysis,
     promote_watchlist_fund,
     remove_watchlist_fund,
     summarize_watchlist,
@@ -285,6 +297,13 @@ def show_holdings_report(args):
     return 0
 
 
+def show_dca_report(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    print(summarize_dca_report(config))
+    return 0
+
+
 def run_policy_check_command(args):
     storage = Storage(BASE_DIR)
     config = storage.load_config(args.config)
@@ -334,6 +353,8 @@ def run_committee_report_command(args):
         daily_run_report=storage.load_daily_run_report(),
         quant_signal_report=storage.load_quant_signal_report(),
         watchlist_report=storage.load_watchlist_analysis_report(),
+        watchlist_funds=storage.load_watchlist_funds(),
+        news_report=storage.load_news_analysis_report(),
         plain=args.plain,
     )
     storage.save_committee_report(report)
@@ -584,6 +605,18 @@ def _daily_steps(args):
             "skip": not args.include_watchlist,
             "skip_message": "daily 默认不分析观察池；如需刷新请使用 --include-watchlist。",
         },
+        {
+            "name": "news-fetch",
+            "func": lambda: _daily_news_fetch(args),
+            "skip": not args.include_news,
+            "skip_message": "daily 默认不抓取新闻；如需刷新请使用 --include-news。",
+        },
+        {
+            "name": "news-analyze",
+            "func": lambda: _daily_news_analyze(args),
+            "skip": not args.include_news,
+            "skip_message": "daily 默认不分析新闻；如需刷新请使用 --include-news。",
+        },
         {"name": "rebalance-advice", "func": lambda: _daily_rebalance_advice(args)},
         {"name": "committee-report", "func": lambda: _daily_committee_report(args)},
     ]
@@ -709,6 +742,51 @@ def _daily_watchlist_analyze(args):
     return {"status": "success", "message": "观察池分析完成。", "infos": infos}
 
 
+def _daily_news_fetch(args):
+    storage = Storage(BASE_DIR)
+    sources, source_infos = ensure_news_sources(storage)
+    report = fetch_news_from_sources(sources, storage.load_news_cache())
+    storage.save_news_cache(report)
+    fetch_status = report.get("fetch_status", {})
+    infos = list(source_infos) + list(fetch_status.get("infos", []))
+    warnings = fetch_status.get("warnings", [])
+    if warnings:
+        return {"status": "warning", "message": "新闻抓取完成，但部分来源失败。", "infos": infos, "warnings": warnings}
+    return {
+        "status": "success",
+        "message": "新闻抓取完成。",
+        "infos": infos or [f"新闻抓取完成，新增 {fetch_status.get('new_count', 0)} 条。"],
+    }
+
+
+def _daily_news_analyze(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    report = analyze_news(storage.load_news_cache(), config, storage.load_watchlist_funds(), days=1)
+    storage.save_news_analysis_report(report)
+    summary = report.get("portfolio_news_summary", {})
+    if not report.get("items"):
+        return {
+            "status": "success",
+            "message": "新闻分析完成，暂无相关重要新闻。",
+            "infos": ["暂无相关重要新闻。"],
+            "news_relevant_count": 0,
+            "news_risk_alert_level": summary.get("risk_alert_level"),
+            "news_overall_tone": summary.get("overall_news_tone"),
+        }
+    warnings = []
+    if summary.get("risk_alert_level") == "high":
+        warnings.append("存在高影响负面新闻，已纳入投委会观察。")
+    return {
+        "status": "warning" if warnings else "success",
+        "message": "新闻分析完成。",
+        "warnings": warnings,
+        "news_relevant_count": summary.get("relevant_news_count", 0),
+        "news_risk_alert_level": summary.get("risk_alert_level"),
+        "news_overall_tone": summary.get("overall_news_tone"),
+    }
+
+
 def _daily_rebalance_advice(args):
     _build_and_save_rebalance_advice(args.config)
     return {"status": "success", "message": "再平衡建议完成。"}
@@ -727,6 +805,8 @@ def _daily_committee_report(args):
         daily_run_report=storage.load_daily_run_report(),
         quant_signal_report=storage.load_quant_signal_report(),
         watchlist_report=storage.load_watchlist_analysis_report(),
+        watchlist_funds=storage.load_watchlist_funds(),
+        news_report=storage.load_news_analysis_report(),
     )
     storage.save_committee_report(report)
     if not (BASE_DIR / "data" / "committee_report.md").exists():
@@ -839,9 +919,11 @@ def _build_daily_conclusion():
     logs = _latest_daily_logs(storage.load_daily_logs())
     rebalance = storage.load_rebalance_advice()
     quant = storage.load_quant_signal_report()
+    news = storage.load_news_analysis_report()
     triggered = any(bool(item.get("suggestions")) for item in logs)
     conclusion = rebalance.get("conclusion", {})
     quant_summary = quant.get("portfolio_quant_summary", {})
+    news_summary = news.get("portfolio_news_summary", {})
     return {
         "drawdown_triggered": triggered,
         "needs_immediate_rebalance": conclusion.get("needs_immediate_rebalance"),
@@ -849,6 +931,9 @@ def _build_daily_conclusion():
         "quant_market_regime": quant_summary.get("market_regime"),
         "average_quant_score": quant_summary.get("average_quant_score"),
         "core_asset_score": quant_summary.get("core_asset_score"),
+        "news_relevant_count": news_summary.get("relevant_news_count"),
+        "news_risk_alert_level": news_summary.get("risk_alert_level"),
+        "news_overall_tone": news_summary.get("overall_news_tone"),
     }
 
 
@@ -1050,10 +1135,14 @@ def watchlist_add_command(args):
             role=args.role,
             reason=args.reason or "",
             nav_mode=args.nav_mode,
+            notes=args.notes or "",
         )
     except ValueError as exc:
         print(str(exc))
         return 1
+    if item.get("already_exists"):
+        print(f"观察池中已存在基金：{args.fund_code}，未重复添加。")
+        return 0
     if args.dry_run:
         print("DRY RUN：不会写入任何配置。")
         print(json.dumps(item, ensure_ascii=False, indent=2))
@@ -1103,7 +1192,14 @@ def watchlist_analyze_command(args):
     aggregate = storage.load_watchlist_analysis_report()
     funds = [item for item in aggregate.get("funds", []) if item.get("fund", {}).get("fund_code") != args.fund_code]
     funds.append(report)
-    storage.save_watchlist_analysis_report({"generated_at": date.today().isoformat(), "funds": funds, "warnings": aggregate.get("warnings", [])})
+    storage.save_watchlist_analysis_report(
+        {
+            "generated_at": date.today().isoformat(),
+            "funds": funds,
+            "summary_funds": [compact_watchlist_analysis(item) for item in funds],
+            "warnings": aggregate.get("warnings", []),
+        }
+    )
     print(f"观察基金分析已写入 data/watchlist_analysis_{args.fund_code}.json")
     print(summarize_watchlist_analysis(report))
     return 0
@@ -1151,6 +1247,101 @@ def watchlist_promote_command(args):
     print(json.dumps(report["holding_snippet"], ensure_ascii=False, indent=2))
     print("policy reminder:")
     print(json.dumps(report["policy_reminder"], ensure_ascii=False, indent=2))
+    print("如你已实际买入该基金，可执行：")
+    print(report["holding_add_command"])
+    print("如你想设置定投，可执行：")
+    print(report["dca_add_command"])
+    print("promote 不会自动买入，也不会自动修改真实持仓。")
+    return 0
+
+
+def news_sources_command(args):
+    storage = Storage(BASE_DIR)
+    sources, infos = ensure_news_sources(storage)
+    print(summarize_news_sources(sources))
+    for info in infos:
+        print(f"Info: {info}")
+    return 0
+
+
+def news_source_add_command(args):
+    storage = Storage(BASE_DIR)
+    sources, _ = ensure_news_sources(storage)
+    try:
+        updated = add_news_source(sources, args.name, args.type, args.url, category=args.category, enabled=not args.disabled)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    storage.save_news_sources(updated)
+    print(f"新闻源已添加：{args.name}")
+    return 0
+
+
+def news_source_enable_command(args):
+    return _set_news_source_enabled(args.name, True)
+
+
+def news_source_disable_command(args):
+    return _set_news_source_enabled(args.name, False)
+
+
+def _set_news_source_enabled(name, enabled):
+    storage = Storage(BASE_DIR)
+    sources, _ = ensure_news_sources(storage)
+    try:
+        updated = set_news_source_enabled(sources, name, enabled)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    storage.save_news_sources(updated)
+    print(f"新闻源已{'启用' if enabled else '禁用'}：{name}")
+    return 0
+
+
+def news_fetch_command(args):
+    storage = Storage(BASE_DIR)
+    sources, infos = ensure_news_sources(storage)
+    report = fetch_news_from_sources(sources, storage.load_news_cache())
+    storage.save_news_cache(report)
+    status = report.get("fetch_status", {})
+    print("新闻抓取完成")
+    print(f"抓取数量：{status.get('fetched_count', 0)}")
+    print(f"新增数量：{status.get('new_count', 0)}")
+    print(f"成功来源：{', '.join(status.get('success_sources', [])) or '无'}")
+    print(f"失败来源：{', '.join(status.get('failed_sources', [])) or '无'}")
+    for info in infos + status.get("infos", []):
+        print(f"Info: {info}")
+    for warning in status.get("warnings", []):
+        print(f"Warning: {warning}")
+    return 0
+
+
+def news_import_command(args):
+    storage = Storage(BASE_DIR)
+    cache, item = import_news(storage.load_news_cache(), args.title, content=args.content or "", source=args.source or "manual")
+    storage.save_news_cache(cache)
+    print("新闻已导入 news_cache.json")
+    print(f"{item['news_id']} | {item['title']}")
+    return 0
+
+
+def news_analyze_command(args):
+    storage = Storage(BASE_DIR)
+    config = storage.load_config(args.config)
+    report = analyze_news(storage.load_news_cache(), config, storage.load_watchlist_funds(), days=args.days)
+    storage.save_news_analysis_report(report)
+    print("新闻分析已写入 data/news_analysis_report.json")
+    print(summarize_news_report(report))
+    return 0
+
+
+def news_report_command(args):
+    storage = Storage(BASE_DIR)
+    report = storage.load_news_analysis_report()
+    if not report:
+        print("暂无新闻分析报告，请先运行 python3 main.py news-analyze。")
+        return 0
+    print(summarize_news_report(report))
     return 0
 
 
@@ -1788,6 +1979,9 @@ def parse_args():
     holding_remove_parser.add_argument("--dry-run", action="store_true", help="只预览修改，不写入文件")
     holding_remove_parser.set_defaults(func=holding_remove_command)
 
+    dca_report_parser = subparsers.add_parser("dca-report", help="查看 active / paused 定投计划")
+    dca_report_parser.set_defaults(func=show_dca_report)
+
     dca_add_parser = subparsers.add_parser("dca-add", help="新增定投计划")
     dca_add_parser.add_argument("fund_code", help="基金代码")
     dca_add_parser.add_argument("--amount", type=float, required=True, help="定投金额")
@@ -1831,6 +2025,7 @@ def parse_args():
     daily_parser.add_argument("--quick", action="store_true", help="快速模式：跳过组合回测和资产贡献分析")
     daily_parser.add_argument("--skip-quant", action="store_true", help="跳过量化信号刷新，使用已有 quant_signal_report.json")
     daily_parser.add_argument("--include-watchlist", action="store_true", help="daily 中同步分析观察池基金")
+    daily_parser.add_argument("--include-news", action="store_true", help="daily 中同步抓取并分析每日财经新闻")
     daily_parser.add_argument("--open-report", action="store_true", help="尝试打开 data/committee_report.md")
     daily_parser.add_argument("--clean-proxy", action="store_true", help="daily 执行期间临时移除代理环境变量")
     daily_parser.add_argument("--debug-network", action="store_true", help="输出 daily 网络环境和 DNS 诊断信息")
@@ -1872,9 +2067,10 @@ def parse_args():
     watchlist_add_parser = subparsers.add_parser("watchlist-add", help="添加基金到观察池")
     watchlist_add_parser.add_argument("fund_code", help="基金代码")
     watchlist_add_parser.add_argument("--name", required=True, help="基金名称")
-    watchlist_add_parser.add_argument("--role", default="unknown", choices=["satellite", "core", "hedge", "factor", "theme", "bond", "unknown"], help="候选角色")
+    watchlist_add_parser.add_argument("--role", default="unknown", choices=["core", "satellite", "hedge", "factor", "theme", "bond", "active", "unknown"], help="候选角色")
     watchlist_add_parser.add_argument("--reason", default="", help="关注原因")
     watchlist_add_parser.add_argument("--nav-mode", default="unit_nav", choices=["unit_nav", "accumulated_nav"], help="净值口径")
+    watchlist_add_parser.add_argument("--notes", default="", help="观察备注")
     watchlist_add_parser.add_argument("--dry-run", action="store_true", help="只预览修改，不写入文件")
     watchlist_add_parser.set_defaults(func=watchlist_add_command)
 
@@ -1895,6 +2091,41 @@ def parse_args():
     watchlist_promote_parser = subparsers.add_parser("watchlist-promote", help="生成候选基金转入真实持仓的配置建议")
     watchlist_promote_parser.add_argument("fund_code", help="基金代码")
     watchlist_promote_parser.set_defaults(func=watchlist_promote_command)
+
+    news_fetch_parser = subparsers.add_parser("news-fetch", help="抓取已启用新闻源的财经新闻")
+    news_fetch_parser.set_defaults(func=news_fetch_command)
+
+    news_analyze_parser = subparsers.add_parser("news-analyze", help="分析最近新闻并生成组合相关新闻报告")
+    news_analyze_parser.add_argument("--days", type=int, default=1, help="分析最近 N 天新闻，默认 1 天")
+    news_analyze_parser.set_defaults(func=news_analyze_command)
+
+    news_report_parser = subparsers.add_parser("news-report", help="查看最近一次新闻分析摘要")
+    news_report_parser.set_defaults(func=news_report_command)
+
+    news_sources_parser = subparsers.add_parser("news-sources", help="查看新闻源配置")
+    news_sources_parser.set_defaults(func=news_sources_command)
+
+    news_source_add_parser = subparsers.add_parser("news-source-add", help="添加新闻源")
+    news_source_add_parser.add_argument("--name", required=True, help="新闻源名称")
+    news_source_add_parser.add_argument("--type", required=True, choices=["rss", "web"], help="新闻源类型")
+    news_source_add_parser.add_argument("--url", required=True, help="新闻源 URL")
+    news_source_add_parser.add_argument("--category", default="market", help="新闻源类别")
+    news_source_add_parser.add_argument("--disabled", action="store_true", help="添加后保持禁用")
+    news_source_add_parser.set_defaults(func=news_source_add_command)
+
+    news_source_enable_parser = subparsers.add_parser("news-source-enable", help="启用新闻源")
+    news_source_enable_parser.add_argument("name", help="新闻源名称")
+    news_source_enable_parser.set_defaults(func=news_source_enable_command)
+
+    news_source_disable_parser = subparsers.add_parser("news-source-disable", help="禁用新闻源")
+    news_source_disable_parser.add_argument("name", help="新闻源名称")
+    news_source_disable_parser.set_defaults(func=news_source_disable_command)
+
+    news_import_parser = subparsers.add_parser("news-import", help="手动导入一条新闻到缓存")
+    news_import_parser.add_argument("--title", required=True, help="新闻标题")
+    news_import_parser.add_argument("--content", default="", help="新闻正文")
+    news_import_parser.add_argument("--source", default="manual", help="新闻来源")
+    news_import_parser.set_defaults(func=news_import_command)
 
     portfolio_report_parser = subparsers.add_parser("portfolio-report", help="查看最近一次组合回测摘要")
     portfolio_report_parser.set_defaults(func=show_portfolio_report)

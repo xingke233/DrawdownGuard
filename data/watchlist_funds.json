@@ -1,3 +1,52 @@
 {
-  "funds": []
+  "funds": [
+    {
+      "fund_code": "018957",
+      "fund_name": "某CPO基金",
+      "reason": "关注CPO",
+      "candidate_role": "satellite",
+      "nav_mode": "unit_nav",
+      "status": "watching",
+      "allow_drawdown_buy": false,
+      "allow_dca": false,
+      "created_at": "2026-06-18",
+      "notes": ""
+    },
+    {
+      "fund_code": "161226",
+      "fund_name": "白银",
+      "reason": "关注白银",
+      "candidate_role": "satellite",
+      "nav_mode": "unit_nav",
+      "status": "watching",
+      "allow_drawdown_buy": false,
+      "allow_dca": false,
+      "created_at": "2026-06-18",
+      "notes": ""
+    },
+    {
+      "fund_code": "025857",
+      "fund_name": "电网",
+      "reason": "关注电网",
+      "candidate_role": "satellite",
+      "nav_mode": "unit_nav",
+      "status": "watching",
+      "allow_drawdown_buy": false,
+      "allow_dca": false,
+      "created_at": "2026-06-18",
+      "notes": ""
+    },
+    {
+      "fund_code": "999999",
+      "fund_name": "候选基金",
+      "reason": "测试观察池",
+      "candidate_role": "satellite",
+      "nav_mode": "unit_nav",
+      "status": "watching",
+      "allow_drawdown_buy": false,
+      "allow_dca": false,
+      "created_at": "2026-06-18",
+      "notes": ""
+    }
+  ]
 }
